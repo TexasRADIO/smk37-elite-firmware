@@ -6,7 +6,7 @@
       "family": "firmwares",
       "slug": "bb-37",
       "name": "Big Beat Studio BB–37",
-      "summary": "A 101-style synth, 303-style acid synth, synthesized 808 and pad-launched Band arrangements for the SMK-37 Elite.",
+      "summary": "A 101-style synth, 303-style acid synth, synthesized 808 and pad-launched Band arrangements for the SMK-37.",
       "kind": "firmware",
       "tags": ["groovebox", "synth", "acid", "drums", "sequencer"],
       "license": "GPL-3.0-only",
@@ -43,11 +43,9 @@
       ],
       "firmware": {
         "devices": [
-          {
-            "device": "smk-37",
-            "revision": "Elite",
-            "asset": "BB-37-Build-*.fwsc"
-          }
+          { "device": "smk-37", "revision": "Pro", "asset": "BB-37-Pro-Build-800.fwsc" },
+          { "device": "smk-37", "revision": "Elite", "asset": "BB-37-Elite-Build-800.fwsc" },
+          { "device": "mke-p37", "revision": "MKE-P37", "asset": "BB-37-MKE-P37-Build-800.fwsc" }
         ],
         "install": {
           "method": "author-installer",
