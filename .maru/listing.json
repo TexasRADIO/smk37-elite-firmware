@@ -1,0 +1,64 @@
+{
+  "$schema": "https://maru.audio/schema/repository/listing/alpha.json",
+  "format": "maru-listing/v1",
+  "listings": [
+    {
+      "family": "firmwares",
+      "slug": "bb-37",
+      "name": "Big Beat Studio BB–37",
+      "summary": "A 101-style synth, 303-style acid synth, synthesized 808 and pad-launched Band arrangements for the SMK-37 Elite.",
+      "kind": "firmware",
+      "tags": ["groovebox", "synth", "acid", "drums", "sequencer"],
+      "license": "GPL-3.0-only",
+      "readme": { "path": "README.md" },
+      "media": [
+        {
+          "path": "media/screen-band.png",
+          "alt": "BB–37 Band arrangement screen",
+          "role": "cover"
+        },
+        {
+          "path": "media/screen-telegram.png",
+          "alt": "BB–37 Telegram 101-style synth screen",
+          "role": "screenshot"
+        },
+        {
+          "path": "media/screen-dillo.png",
+          "alt": "BB–37 Dillo 303-style acid synth screen",
+          "role": "screenshot"
+        },
+        {
+          "path": "media/screen-808.png",
+          "alt": "BB–37 synthesized 808 screen",
+          "role": "screenshot"
+        }
+      ],
+      "links": {
+        "homepage": "https://thebigbeat.app/elite/",
+        "documentation": "https://thebigbeat.app/elite/",
+        "support": "https://github.com/TexasRADIO/smk37-elite-firmware/issues"
+      },
+      "credits": [
+        { "github": "TexasRADIO", "role": "owner" }
+      ],
+      "firmware": {
+        "devices": [
+          {
+            "device": "smk-37",
+            "revision": "Elite",
+            "asset": "BB-37-Build-*.fwsc"
+          }
+        ],
+        "install": {
+          "method": "author-installer",
+          "url": "https://thebigbeat.app/elite/install/"
+        }
+      }
+    }
+  ],
+  "display": {
+    "readme": true,
+    "media": true,
+    "mirror": false
+  }
+}
