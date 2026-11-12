@@ -1,0 +1,15 @@
+{
+  "schema": "bb-bob-brand-font/v1",
+  "family": "Picnic Filled",
+  "author_attribution": "Taylor Rushing, supplied Big Beat brand font collection",
+  "file": "Picnic.otf",
+  "sha256": "d05d16a4bd9054e119234880972f943c459fd5a2af1f49db709055996fc9c1f2",
+  "source": "Big Beat Studio owner-supplied brand font collection",
+  "owner_instruction": "Use Taylor Rushing fonts across firmware except small text where legibility is key",
+  "precedent": "Existing BB1 visual/v3/mock3.py uses Picnic Filled for names",
+  "native": "Compact one-bit uppercase/digit subset, generated from the original supplied font; symbols absent from the font use clear bitmap glyphs",
+  "web": "Original supplied font, unchanged bytes",
+  "small_text": "Existing7pxbitmap preserved for utility labels and technical readouts",
+  "font_embedding_metadata_fsType": 0,
+  "license_scope": "Owner-supplied brand asset used at explicit owner request; original metadata retained; no open-source font licence is asserted"
+}

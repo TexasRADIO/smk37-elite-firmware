@@ -12,6 +12,14 @@ Open the [BB-37 installer](https://thebigbeat.app/elite/install/) in the latest 
 
 The installer identifies the connected model and selects the matching package.
 
+## Hardware verification
+
+Build 800 has been installed and run on a physical SMK-37 Elite. The same unit completed the return sequence Build 800 → factory Build 797 → Build 800. The Pro and MKE-P37 downloads have passed package and native verification; this statement does not claim physical testing on those two model labels.
+
+## Build
+
+The repository contains the application source, pinned board source, generated public phrase data and the packaging tools used for Build 800. See [BUILDING.md](BUILDING.md) for the reproducible build command and toolchain requirement.
+
 ## Play
 
 Choose sounds and patterns in the Library, shape them with the knobs, then use Band to cue Telegram, Dillo and drums together.

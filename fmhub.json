@@ -3,5 +3,11 @@
   "author": "Big Beat Studio",
   "kinds": ["groove", "synth", "drums"],
   "image": "media/screen-band.png",
-  "color": "#FF6A33"
+  "color": "#FF6A33",
+  "smk37": {
+    "what": "BB-37 for SMK-37 Pro, SMK-37 Elite and MKE-P37. The installer detects the connected model and selects its Build 800 package.",
+    "image": "media/screen-band.png",
+    "install": "https://thebigbeat.app/elite/install/",
+    "guide": "https://thebigbeat.app/elite/"
+  }
 }
