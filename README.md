@@ -12,6 +12,11 @@ Open the [BB-37 installer](https://thebigbeat.app/elite/install/) in the latest 
 
 The installer identifies the connected model and selects the matching package.
 
+The packages use separate Hub-visible identities for the three hardware
+models: `FM-1_92370001` (Pro), `FM-1_92370002` (Elite) and
+`FM-1_92370003` (MKE-P37). The update loader retains each keyboard's model
+name and stock return route.
+
 ## Hardware verification
 
 Build 800 has been installed and run on a physical SMK-37 Elite. The same unit completed the return sequence Build 800 → factory Build 797 → Build 800. The Pro and MKE-P37 downloads have passed package and native verification; this statement does not claim physical testing on those two model labels.

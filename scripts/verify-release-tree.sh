@@ -5,3 +5,5 @@ if git ls-files | grep -E -i '(recovery|handover|research|evidence|audit|tempora
   printf '%s\n' 'Disallowed public release path.' >&2
   exit 1
 fi
+
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify-package-identities.py
