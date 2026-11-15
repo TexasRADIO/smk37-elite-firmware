@@ -12,9 +12,22 @@ Open the [BB-37 installer](https://thebigbeat.app/elite/install/) in the latest 
 
 The installer identifies the connected model and selects the matching package.
 
+## Going back to M-VAVE's firmware
+
+You can return to M-VAVE's own firmware at any time. BB-37 never writes the keyboard's calibration, Bluetooth pairing or boot area, and the keyboard keeps its own model identity (`SMK-37 Pro`, `SMK-37 Elite` or `MKE-P37`) throughout.
+
+1. Download M-VAVE's firmware for your model, version 016 (`SMK-37 Pro_016`, `SMK-37 Elite_016` or `MKE-P37_016`), from [m-vave.com/download](https://www.m-vave.com/download).
+2. Close other browser tabs and music software that use the keyboard's MIDI port. On Windows only one program can use it at a time.
+3. With BB-37 running and the keyboard connected directly by USB, open the [BB-37 installer](https://thebigbeat.app/elite/install/#return), choose the file under **Going back to M-VAVE's firmware** and press **Return to M-VAVE firmware**. Keep the cable connected until the page says it is back.
+4. At its first start, M-VAVE's firmware rebuilds its factory key, knob and fader mapping.
+
+The installer accepts only M-VAVE's version 016 file for the connected model, and checks it against M-VAVE's unmodified file where that checksum is known. M-VAVE's own updater, M-UPGRADE, can install the same file. If a transfer is cut off, reconnect the keyboard and press the same button again with the same file.
+
+Other SMK-37 firmware installers start only from M-VAVE's firmware (`<model>_016`). They do not recognise a keyboard running BB-37 (`<model>_<build>`) and stop before writing anything. Return to M-VAVE's firmware first, then use their installer.
+
 ## Hardware verification
 
-Build 800 has been installed and run on a physical SMK-37 Elite. The same unit completed the return sequence Build 800 → factory Build 797 → Build 800. The Pro and MKE-P37 downloads have passed package and native verification; this statement does not claim physical testing on those two model labels.
+Build 800 has been installed and run on a physical SMK-37 Elite. The same unit completed the return sequence Build 800 → factory Build 797 → Build 800. The Pro and MKE-P37 downloads have passed package and native verification; this statement does not claim physical testing on those two model labels. The return to M-VAVE's version 016 uses the same update exchange as an install; it has not yet been repeated on hardware by this project.
 
 ## Build
 
