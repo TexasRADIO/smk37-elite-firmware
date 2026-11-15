@@ -15,9 +15,21 @@ from usb_clock import stage as stage_clock
 
 ROOT = Path(__file__).resolve().parents[1]
 SMK_MODELS = {
-    "pro": {"identity": "SMK-37 Pro", "stub_lock": "stub_smk37.lock"},
-    "elite": {"identity": "SMK-37 Elite", "stub_lock": "stub_smk37-elite.lock"},
-    "mke": {"identity": "MKE-P37", "stub_lock": "stub_smk37-mke.lock"},
+    "pro": {
+        "identity": "SMK-37 Pro",
+        "product": "FM-1_92370001",
+        "stub_lock": "stub_smk37.lock",
+    },
+    "elite": {
+        "identity": "SMK-37 Elite",
+        "product": "FM-1_92370002",
+        "stub_lock": "stub_smk37-elite.lock",
+    },
+    "mke": {
+        "identity": "MKE-P37",
+        "product": "FM-1_92370003",
+        "stub_lock": "stub_smk37-mke.lock",
+    },
 }
 UNITS = ["board/main.c", "pi32/runtime.c", "synth/telegram101.c", "synth/presets.c", "synth/fx101.c", "synth/store101.c", "synth/catalog101.c", "synth/midi101.c", "synth/clock101.c"]
 DRUM_RENDER_HOT = ("bb_drum808_render_q23", "bd_tick", "sd_tick", "tom_tick", "cl_tick", "rs_tick", "cp_tick",
@@ -95,7 +107,10 @@ def font_header(path, dest):
 
 def build(args):
     model = SMK_MODELS[args.model]
-    product = f"{model['identity']}_{args.build_number}"
+    # The model name selects the correct board stub and stock return route.
+    # The package/application identity is a separate, Hub-visible FM-1_
+    # number.  It must be unique without replacing SMK_MODEL in the loader.
+    product = model["product"]
     out = args.out.resolve()
     out.mkdir(exist_ok=False)
     imported = None

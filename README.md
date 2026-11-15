@@ -12,6 +12,8 @@ Open the [BB-37 installer](https://thebigbeat.app/elite/install/) in the latest 
 
 The installer identifies the connected model and selects the matching package.
 
+The packages use separate Hub-visible identities for the three hardware models: `FM-1_92370001` (Pro), `FM-1_92370002` (Elite) and `FM-1_92370003` (MKE-P37). The update loader retains each keyboard's model name and stock return route.
+
 ## Going back to M-VAVE's firmware
 
 You can return to M-VAVE's own firmware at any time. BB-37 never writes the keyboard's calibration, Bluetooth pairing or boot area, and the keyboard keeps its own model identity (`SMK-37 Pro`, `SMK-37 Elite` or `MKE-P37`) throughout.
