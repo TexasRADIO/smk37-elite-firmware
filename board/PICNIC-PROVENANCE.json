@@ -1,0 +1,12 @@
+{
+  "schema": "bb-bob-brand-font/v1",
+  "family": "Picnic Filled",
+  "author_attribution": "Taylor Rushing",
+  "file": "Picnic.otf",
+  "sha256": "d05d16a4bd9054e119234880972f943c459fd5a2af1f49db709055996fc9c1f2",
+  "source": "Big Beat brand font collection; generated firmware glyph subset.",
+  "native": "Compact one-bit uppercase/digit subset, generated from the original supplied font; symbols absent from the font use clear bitmap glyphs",
+  "small_text": "Existing7pxbitmap preserved for utility labels and technical readouts",
+  "font_embedding_metadata_fsType": 0,
+  "license_scope": "Original font rights retained; no open-source font licence is asserted."
+}

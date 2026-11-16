@@ -1,0 +1,192 @@
+{
+  "compas": {
+    "release": "Comp\u00e1s 1.1",
+    "license": "GPL-3.0-only",
+    "bytes": 230466,
+    "sha256": "fe24c5c074fad8a152a9db237c1e3bbe08045189cf6701c75582aa676eda8f05"
+  },
+  "hanan": {
+    "title": "Hanan Cumbia",
+    "author": "Oficina de Sonido",
+    "source": "https://hanancumbia.oficinadesonido.org/",
+    "build": "hanan26Taller, 2026-07-21",
+    "license": "CC BY-SA 3.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+    "changes": "Original unsigned PCM extracted from the Comp\u00e1s Kumbia Kit WAV files. Bytes unchanged.",
+    "bytes": 19981,
+    "sha256": "9f4960e12f2a2805ebed4e0e84c92125601b09a2fcdd619ab1cacb5390e34276"
+  },
+  "clips": [
+    {
+      "name": "High bongo",
+      "offset": 0,
+      "frames": 10361,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "43547d68d170b23d01edfa86916f126743bd2cf5f2b33eab24e30642b8959b62",
+      "packed_bytes": 4494
+    },
+    {
+      "name": "Low bongo",
+      "offset": 4494,
+      "frames": 8066,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "39a5e79f0b7bb8f80abb370d7e618dbe1c1051006cbdef8d0e5e585a742cd077",
+      "packed_bytes": 4080
+    },
+    {
+      "name": "Muted high conga",
+      "offset": 8574,
+      "frames": 7666,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "f430246d1cb51d8b94e523df40a42b5297225748332b9e3eaea889f571b1e1fa",
+      "packed_bytes": 3020
+    },
+    {
+      "name": "Open high conga",
+      "offset": 11594,
+      "frames": 7745,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "4ed3ca78ce275259db73356e1471de9dfe249dd83f975cb1fabdd9eac3a78df9",
+      "packed_bytes": 3356
+    },
+    {
+      "name": "Low conga",
+      "offset": 14950,
+      "frames": 15278,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "0c8338bce2d074999777f5026f169f6839eee38c9a03849e629d37187369a900",
+      "packed_bytes": 5962
+    },
+    {
+      "name": "High timbale",
+      "offset": 20912,
+      "frames": 29612,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "979bdad0b7ea2e776a2f7d5bb40357ca27673bab947fac94209b55fb867306d7",
+      "packed_bytes": 15724
+    },
+    {
+      "name": "Low timbale",
+      "offset": 36636,
+      "frames": 29801,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "e911247c1133fb1b06bae4a14a9291f852c37fa308b0282f62a49ee5d707c95a",
+      "packed_bytes": 14706
+    },
+    {
+      "name": "High agogo",
+      "offset": 51342,
+      "frames": 6400,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "1d36224e2b1c2a30d2f54c24f2f6ad5e12b502ff16ac6d16d4e87901bc3ed68e",
+      "packed_bytes": 6261
+    },
+    {
+      "name": "Low agogo",
+      "offset": 57603,
+      "frames": 7280,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "c5af1d109a7a7c747eafc83f8dc0196b2adba3e3e5e101db96ace6c189974346",
+      "packed_bytes": 7710
+    },
+    {
+      "name": "Cabasa",
+      "offset": 65313,
+      "frames": 6929,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "656c6dcf28cf012c2e6bab90179f1d4013c3d434f10cf684757b3a73e833156c",
+      "packed_bytes": 7491
+    },
+    {
+      "name": "Maracas",
+      "offset": 72804,
+      "frames": 4632,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "a175620b1f16ed338d032a1f71516239f8919255aa0ae6ffa002e6fdc33dd5bc",
+      "packed_bytes": 4648
+    },
+    {
+      "name": "Short whistle",
+      "offset": 77452,
+      "frames": 6107,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "f4dfc6db38d10cbfa50942b2e2cfb139c323d67abbdd223d7264a58b27291384",
+      "packed_bytes": 6323
+    },
+    {
+      "name": "Long whistle",
+      "offset": 83775,
+      "frames": 11920,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "b2aad1e3886115d7b418364bf1824ebb98390661bd9e0b8ef627ca98f7010d12",
+      "packed_bytes": 14244
+    },
+    {
+      "name": "Quijada",
+      "offset": 98019,
+      "frames": 58403,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "d2f3a09e27832bfe63fed1e78b22328371e2e83c2a01236a89cd843a9619d0ef",
+      "packed_bytes": 64701
+    },
+    {
+      "name": "Star chime",
+      "offset": 162720,
+      "frames": 61726,
+      "encoding": "predictive-rice-128-v1",
+      "rate": 44100,
+      "pcm_sha256": "70e76621c98c369a61d3359deae88d2d62ac4920661c82d6e1c8021f10322143",
+      "packed_bytes": 67746
+    },
+    {
+      "name": "bombo-kick",
+      "offset": 0,
+      "frames": 5744,
+      "encoding": "u8",
+      "rate": 9804,
+      "pcm_sha256": "63d50cecb301ef8a916c97954e8af71c8b838e07d5e4bc053cd7e80222e622cb",
+      "source_sha256": "f96f3e11263e4f564022088f579edb89b9f2db0599cde65a37d2aae9b890edab"
+    },
+    {
+      "name": "huiro-guiro",
+      "offset": 5744,
+      "frames": 2893,
+      "encoding": "u8",
+      "rate": 9804,
+      "pcm_sha256": "c28cb165f4be3cd3d7c5813f2685094877be03918324edb6f284814e84e0f5f1",
+      "source_sha256": "8103e4172f68906b6fff17bfb85b179bb2098000a09124da59b37d730bd45399"
+    },
+    {
+      "name": "campana-cowbell",
+      "offset": 8637,
+      "frames": 6055,
+      "encoding": "u8",
+      "rate": 9804,
+      "pcm_sha256": "54e4879eaca10d18a9468efca64b686329f98f1229ac3a167b32c9d4c5208eae",
+      "source_sha256": "3d2e149c8b38f495fec0d3223fabbd3a91f83b3e676fa76c21d481455a4b7eb9"
+    },
+    {
+      "name": "conga",
+      "offset": 14692,
+      "frames": 5289,
+      "encoding": "u8",
+      "rate": 9804,
+      "pcm_sha256": "0b87ada1d3be5a1a9cde4937fd98fc57969b0d90c89b8e4dfad9c0196e176c36",
+      "source_sha256": "4612fa0afaf61ed1ec0bd4dc390e40b0d47322d01945eaec23cdeaede8e1dbc6"
+    }
+  ]
+}

@@ -1,0 +1,164 @@
+{
+  "scope": "directory only: clip placement from the qualified compact bank. The sector overlay and return images still come from tools/plan_727_flash.py with two fresh reads of the unit.",
+  "bank_sha256": {
+    "compas727.bin": "fe24c5c074fad8a152a9db237c1e3bbe08045189cf6701c75582aa676eda8f05",
+    "hanan-cumbia.bin": "9f4960e12f2a2805ebed4e0e84c92125601b09a2fcdd619ab1cacb5390e34276",
+    "layer727.json": "9f6d8778b1f55afbddb3a51a93d99e6cb6ee1db5de69546480a8e5acb95e2b67"
+  },
+  "directory_sha256": "22c00fdca3d0e7e1d061085890b7f4dcc512533e7ee6e5e71a624a5e41f35066",
+  "pool_bytes": 250447,
+  "clips": [
+    {
+      "name": "High bongo",
+      "offset": 757855,
+      "frames": 10361,
+      "bytes": 4494,
+      "sha256": "5cbadefb3a067a2a1a4b99de28e6cc719edaf16d63d66d689d58b1fa9b4c2775",
+      "crc32": 627833603
+    },
+    {
+      "name": "Low bongo",
+      "offset": 643072,
+      "frames": 8066,
+      "bytes": 4080,
+      "sha256": "f416dd57cd541f1221e48646d963d72ce9b8d304b40707240a424a6d29c93788",
+      "crc32": 2484497146
+    },
+    {
+      "name": "Muted high conga",
+      "offset": 647152,
+      "frames": 7666,
+      "bytes": 3020,
+      "sha256": "ee58d3bdcad30c79042147c636b83d45cf52a5e1e4a1375a245144e0108b2623",
+      "crc32": 1765925129
+    },
+    {
+      "name": "Open high conga",
+      "offset": 762349,
+      "frames": 7745,
+      "bytes": 3356,
+      "sha256": "a8b468f53bd29b73039c530192c3909e912cac3fdeaf3586b9a15a5c6729c138",
+      "crc32": 1724703270
+    },
+    {
+      "name": "Low conga",
+      "offset": 736212,
+      "frames": 15278,
+      "bytes": 5962,
+      "sha256": "ece1a75c3e2e41c3a362549730c1ef4e987217e6e1dc3040556cd3c2d26c6aa1",
+      "crc32": 2332589181
+    },
+    {
+      "name": "High timbale",
+      "offset": 927071,
+      "frames": 29612,
+      "bytes": 15724,
+      "sha256": "2a4a5276502fe2af87d9084ba7308ba0af33c922108894c8524cd8a371982a73",
+      "crc32": 232407251
+    },
+    {
+      "name": "Low timbale",
+      "offset": 942795,
+      "frames": 29801,
+      "bytes": 14706,
+      "sha256": "a8028a9110d1a3dd790426d0aef795b8810d357f406cc623c49446874031b094",
+      "crc32": 536843600
+    },
+    {
+      "name": "High agogo",
+      "offset": 723896,
+      "frames": 6400,
+      "bytes": 6261,
+      "sha256": "ecf9e2bd3e249b6edbc162fa268376e0e81b44d82a3bcf6e2ccdf664b7c86020",
+      "crc32": 876531635
+    },
+    {
+      "name": "Low agogo",
+      "offset": 702372,
+      "frames": 7280,
+      "bytes": 7710,
+      "sha256": "8c19365e4380d58d298371473fb987286aebc16861e646ccaf63e4c2edf116b7",
+      "crc32": 3525801395
+    },
+    {
+      "name": "Cabasa",
+      "offset": 710082,
+      "frames": 6929,
+      "bytes": 7491,
+      "sha256": "809f8e1605439e8e2ef27dc8d00e5f160a3d6a388b479df79d79d1cd0584f19e",
+      "crc32": 4008778069
+    },
+    {
+      "name": "Maracas",
+      "offset": 753207,
+      "frames": 4632,
+      "bytes": 4648,
+      "sha256": "a3fc8441118185785c8165af721a380f446936bfd17323421fdc8d068d4d79c1",
+      "crc32": 1995693529
+    },
+    {
+      "name": "Short whistle",
+      "offset": 717573,
+      "frames": 6107,
+      "bytes": 6323,
+      "sha256": "62086efddaed18192fb84af642258c6ffb580e35320ea11e1b73a0c27cf7de66",
+      "crc32": 1648977735
+    },
+    {
+      "name": "Long whistle",
+      "offset": 688128,
+      "frames": 11920,
+      "bytes": 14244,
+      "sha256": "eaf8895d9461953571fb10b488d620f63b6386759f0b75ece5f6b005ad263fe1",
+      "crc32": 2592803828
+    },
+    {
+      "name": "Quijada",
+      "offset": 862370,
+      "frames": 58403,
+      "bytes": 64701,
+      "sha256": "30a9dff6297af8d5a4a4ce9df1455fa5db607d11488d0f93733fccd899a9766f",
+      "crc32": 1365388615
+    },
+    {
+      "name": "Star chime",
+      "offset": 794624,
+      "frames": 61726,
+      "bytes": 67746,
+      "sha256": "5824a040dd90e053392c69fc7d1dde670f1b4fd5c64885bb09b174f2f677d3ec",
+      "crc32": 3382254871
+    },
+    {
+      "name": "bombo-kick",
+      "offset": 742174,
+      "frames": 5744,
+      "bytes": 5744,
+      "sha256": "63d50cecb301ef8a916c97954e8af71c8b838e07d5e4bc053cd7e80222e622cb",
+      "crc32": 3643634366
+    },
+    {
+      "name": "huiro-guiro",
+      "offset": 650172,
+      "frames": 2893,
+      "bytes": 2893,
+      "sha256": "c28cb165f4be3cd3d7c5813f2685094877be03918324edb6f284814e84e0f5f1",
+      "crc32": 1221553979
+    },
+    {
+      "name": "campana-cowbell",
+      "offset": 730157,
+      "frames": 6055,
+      "bytes": 6055,
+      "sha256": "54e4879eaca10d18a9468efca64b686329f98f1229ac3a167b32c9d4c5208eae",
+      "crc32": 2992928244
+    },
+    {
+      "name": "conga",
+      "offset": 747918,
+      "frames": 5289,
+      "bytes": 5289,
+      "sha256": "0b87ada1d3be5a1a9cde4937fd98fc57969b0d90c89b8e4dfad9c0196e176c36",
+      "crc32": 2870799508
+    }
+  ]
+}
