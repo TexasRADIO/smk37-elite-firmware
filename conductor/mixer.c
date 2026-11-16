@@ -48,15 +48,18 @@ void mix_frames(conductor_mix_state *state, int32_t *const input[], unsigned lan
              * the four round-toward-zero shifts, including zero gains. */
             int32_t sign = mono >> 31;
             int32_t stereo_bias = sign & 255;
-            int32_t lane_left = (mono * g[0] + stereo_bias) >> 8;
-            int32_t lane_right = (mono * g[1] + stereo_bias) >> 8;
+            /* Dillo sits 6 dB up on Telegram and the 808 kits 12 dB.
+             * Their sends rise with them. */
+            unsigned up = lane == MIX_TELEGRAM ? 0u : lane == MIX_DILLO ? 1u : 2u;
+            int32_t lane_left = (mono * g[0] + (stereo_bias >> up)) >> (8 - up);
+            int32_t lane_right = (mono * g[1] + (stereo_bias >> up)) >> (8 - up);
             left += lane_left;
             right += lane_right;
             if (!(signal_lanes & (1u << lane)) &&
                 ((uint32_t)(lane_left + 256) > 512u || (uint32_t)(lane_right + 256) > 512u))
                 signal_lanes |= 1u << lane;
-            echo += (mono * g[2] + (sign & 65535)) >> 16;
-            room += (mono * g[3] + (sign & 131071)) >> 17;
+            echo += (mono * g[2] + (sign & (65535 >> up))) >> (16 - up);
+            room += (mono * g[3] + (sign & (131071 >> up))) >> (17 - up);
         }
         input[MIX_TELEGRAM][offset] = left;
         input[MIX_TELEGRAM][offset + 1] = right;
@@ -74,7 +77,8 @@ void conductor_prepare_mix(conductor_mix_targets *targets, const conductor_mixer
         /* Telegram has already applied its patch drive. */
         targets->drive_scale[lane] = lane == MIX_TELEGRAM || !v[MIX_DRIVE] ? 0 : (uint16_t)(128u + 4u * v[MIX_DRIVE]);
         uint16_t *target = targets->gain[lane];
-        unsigned level = (v[MIX_LEVEL] * 256u + 63u) / 127u;
+        unsigned raw = v[MIX_LEVEL]; /* the 727 keeps its own level: a bongo breakdown needs no 808 */
+        unsigned level = (raw * 256u + 63u) / 127u;
         unsigned pan = v[MIX_PAN];
         target[0] = (uint16_t)(pan <= 64 ? level : (level * (127u - pan) + 31u) / 63u);
         target[1] = (uint16_t)(pan >= 64 ? level : (level * pan + 32u) / 64u);

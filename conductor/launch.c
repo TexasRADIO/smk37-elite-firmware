@@ -159,6 +159,7 @@ int conductor_render_telegram(conductor_launch *launch, tg_voice *voice, int32_t
                               const tg_controls *requested, const conductor_patterns *patterns, unsigned *edge)
 {
     launch->telegram_bar = 0;
+    voice->fixed_master = CONDUCTOR_TELEGRAM_LEVEL;
     unsigned pending = launch->active.telegram_cue != patterns->telegram_cue;
     unsigned stable = voice->phrase_with_arp && patterns->publication &&
                       launch->consumed_publication == patterns->publication;
@@ -248,17 +249,28 @@ static int mix_layers(conductor_launch *launch, int32_t *bass, int32_t *drums, i
     if (dillo_layer_mix_grid(&launch->dillo, bass, frames, controls, edge, launch->drums.step,
                             active->dillo_on ? &active->dillo : NULL)) return -1;
     RENDER_ACCUMULATE(MIX_DILLO, stamp);
-    if (drums_b) {
-        launch->drums_b.step = launch->drums.step;
+    /* The 808 renders before B so that B, the lightest part, is the one that can give way. B shares the
+     * step A had at the start of the block. */
+    unsigned step = launch->drums.step;
+    stamp = RENDER_STAMP();
+    int result = drum_layer_mix(&launch->drums, drums, frames, controls, edge,
+                                active->drums_on ? &active->drums : NULL);
+    RENDER_ACCUMULATE(MIX_808, stamp);
+    if (drums_b && !result) {
+#ifdef ELITE_PERCUSSION_727
+        if (launch->drums_b.percussion.bank && launch->drums_b_fits && !launch->drums_b_fits()) {
+            launch->drums_b.percussion.active = 0;
+            launch->drums_b.step = launch->drums.step; /* where a rendered B would have ended */
+            launch->drums_b_shed++;
+            return 0;
+        }
+#endif
+        launch->drums_b.step = step;
         stamp = RENDER_STAMP();
         if (drum_layer_mix(&launch->drums_b, drums_b, frames, controls, edge,
                            active->drums_b.enabled && !active->drums_b.muted ? &active->drums_b.pattern : NULL)) return -1;
         RENDER_ACCUMULATE(MIX_808_B, stamp);
     }
-    stamp = RENDER_STAMP();
-    int result = drum_layer_mix(&launch->drums, drums, frames, controls, edge,
-                                active->drums_on ? &active->drums : NULL);
-    RENDER_ACCUMULATE(MIX_808, stamp);
     return result;
 }
 

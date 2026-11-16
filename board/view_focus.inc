@@ -585,7 +585,8 @@ static int focus_lookup(const struct panel *panel, unsigned k, struct focus_card
             c->a = k == 2 ? panel->midi_channel : panel->pad_midi_channel; c->value = c->a + 1;
             c->note = k == 2 ? "KEYS SEND AND RECEIVE HERE" : "NOTE PADS SEND HERE"; return 1;
         }
-        if (k == 4) { TILES("USB MIDI OUT", off_on, 2, panel->midi_tx); return 1; }
+        if (k == 4) { static const char *const routes[] = {"OFF", "USB", "TRS", "BOTH"}; TILES("MIDI OUT", routes, 4, panel->midi_tx); return 1; }
+        if (k == 7) { TILES("CLOCK OUT", off_on, 2, panel->clock_out); return 1; }
         if (k == 5) { TILES("PROFILE", profiles, 8, panel->profile); return 1; }
         if (k == 6) { TILES("PEDAL", pedals, 3, panel->pedal_mode); return 1; }
         return 0;

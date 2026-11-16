@@ -56,6 +56,32 @@ static inline void conductor_headroom(int32_t *stereo)
     }
 }
 
+uint16_t tg_fx_tap_for(unsigned samples)
+{
+    while (samples > TG_DELAY_SIZE - 1u) samples /= 2u;
+    return (uint16_t)(samples ? samples : 1u);
+}
+
+void tg_fx_set_eighth(tg_fx *fx, uint32_t eighth, unsigned slack_permille)
+{
+    if (eighth < 1000u || eighth > 200000u) return;
+    if (fx->eighth) {
+        uint32_t diff = eighth > fx->eighth ? eighth - fx->eighth : fx->eighth - eighth;
+        if ((uint64_t)diff * 1000u <= (uint64_t)fx->eighth * slack_permille) return;
+    }
+    fx->eighth = eighth;
+    fx->tap_goal[0] = tg_fx_tap_for(eighth);                      /* 1/8 */
+    fx->tap_goal[1] = tg_fx_tap_for((eighth * 4u + 1u) / 3u);     /* 1/4 triplet */
+    for (unsigned i = 0; i < 2; i++)
+        if (!fx->tap[i]) fx->tap[i] = i ? 14700u : 11025u; /* glide from where the echo was */
+}
+
+void tg_fx_set_tempo(tg_fx *fx, unsigned tempo)
+{
+    if (tempo < 20u || tempo > 400u) return;
+    tg_fx_set_eighth(fx, (44100u * 60u / 2u + tempo / 2u) / tempo, 0);
+}
+
 /* Keep the shared sample body in the render loops. PI32 otherwise saves
  * and restores eleven registers on every call. */
 static const uint16_t room_length[] = {1223, 1429, 1619, 1879};
@@ -65,8 +91,11 @@ static inline __attribute__((always_inline)) void mix_sample(tg_fx *fx, int32_t 
                                                             unsigned master, unsigned full)
 {
     unsigned pos = fx->delay_pos;
-    int32_t echo_l = full || fx->delay_age >= 11025u ? fx->delay[(pos - 11025u) & (TG_DELAY_SIZE - 1u)] : 0;
-    int32_t echo_r = full || fx->delay_age >= 14700u ? fx->delay[(pos - 14700u) & (TG_DELAY_SIZE - 1u)] : 0;
+    unsigned tap_l = fx->tap[0] ? fx->tap[0] : 11025u, tap_r = fx->tap[1] ? fx->tap[1] : 14700u;
+    if (fx->tap[0] != fx->tap_goal[0]) fx->tap[0] = (uint16_t)(fx->tap[0] + (fx->tap[0] < fx->tap_goal[0] ? 1 : -1));
+    if (fx->tap[1] != fx->tap_goal[1]) fx->tap[1] = (uint16_t)(fx->tap[1] + (fx->tap[1] < fx->tap_goal[1] ? 1 : -1));
+    int32_t echo_l = full || fx->delay_age >= tap_l ? fx->delay[(pos - tap_l) & (TG_DELAY_SIZE - 1u)] : 0;
+    int32_t echo_r = full || fx->delay_age >= tap_r ? fx->delay[(pos - tap_r) & (TG_DELAY_SIZE - 1u)] : 0;
     fx->delay[pos] = (int16_t)limit(delay_input + tg_fx_trunc_shift(echo_r * 3, 3), 32767);
     fx->delay_pos = (uint16_t)((pos + 1u) & (TG_DELAY_SIZE - 1u));
     if (!full && fx->delay_age < TG_DELAY_SIZE) fx->delay_age++;
@@ -109,12 +138,20 @@ static int bus_has_input(const int32_t *delay, const int32_t *room, unsigned fra
     return 0;
 }
 
+/* The Band's master on the whole mix, before the soft knee: 64 is unity, 127 about +6 dB, 0 silent. */
+static inline int32_t master_gain(int32_t sample, unsigned master)
+{
+    return master == 64u ? sample : (int32_t)(((int64_t)sample * (int64_t)master) >> 6);
+}
+
 static inline __attribute__((always_inline)) void render_wet_bus(
     tg_fx *fx, int32_t *stereo, const int32_t *delay, const int32_t *room,
     unsigned frames, unsigned master, unsigned full)
 {
     for (unsigned i = 0; i < frames; i++) {
         mix_sample(fx, stereo + i * 2u, delay[i], room[i], master, full);
+        stereo[i * 2u] = master_gain(stereo[i * 2u], master);
+        stereo[i * 2u + 1u] = master_gain(stereo[i * 2u + 1u], master);
         conductor_headroom(stereo + i * 2u);
     }
 }
@@ -127,7 +164,8 @@ void tg_fx_render_bus(tg_fx *fx, int32_t *stereo, const int32_t *delay, const in
      * alone so the first send still starts with zero history. */
     if (!fx->delay_age && !fx->room_age[0] && !bus_has_input(delay, room, frames)) {
         for (unsigned i = 0; i < frames; i++) {
-            if (!master) stereo[2u * i] = stereo[2u * i + 1u] = 0;
+            stereo[2u * i] = master_gain(stereo[2u * i], master);
+            stereo[2u * i + 1u] = master_gain(stereo[2u * i + 1u], master);
             conductor_headroom(stereo + 2u * i);
         }
         return;

@@ -1,0 +1,21 @@
+{
+  "product": "BB-37",
+  "model": "SMK-37 Elite",
+  "build": 826,
+  "identity": "SMK-37 Elite_3737826",
+  "package": "BB-37-Elite-Build-826.fwsc",
+  "package_sha256": "e1fcf4ca4553dbc89c8a09a78b5b0ce8990fa14671eb724c931374d43baf30c2",
+  "package_bytes": 651500,
+  "source_archive": "BB-37-Elite-826-Source.tar.gz",
+  "source_tag": "build-826",
+  "repository": "https://github.com/TexasRADIO/smk37-elite-firmware",
+  "guide": "https://thebigbeat.app/elite/",
+  "installer": "https://thebigbeat.app/elite/install/",
+  "target_scope": "SMK-37 Elite only; SMK-37 Pro and MKE-P37 use their separate model-specific packages.",
+  "content_scope": "Application update for a device with matching percussion content; the FWSC does not provision the separately installed 727 banks.",
+  "status": "Released application update",
+  "hardware_tested": true,
+  "release_url": "https://github.com/TexasRADIO/smk37-elite-firmware/releases/tag/build-826",
+  "source_url": "https://github.com/TexasRADIO/smk37-elite-firmware/tree/build-826",
+  "package_url": "https://github.com/TexasRADIO/smk37-elite-firmware/releases/download/build-826/BB-37-Elite-Build-826.fwsc"
+}

@@ -202,6 +202,16 @@ static void draw_instrument_page(uint16_t *pixels, const struct panel *panel,
     if (panel->page == PAGE_INSTRUMENTS) title = "INSTRUMENTS";
     if (panel->page == PAGE_DRUMS) title = drum_part(panel) ? "DRUMS 808 B" : ELITE_DRUM_PARTS > 1 ? "DRUMS 808 A" : "DRUMS 808";
     if (panel->key_focus_notice) title = panel->conductor_dillo_keys ? "KEYS DILLO" : "KEYS 101";
+    char main_title[12] = "MAIN ";
+    /* Part and 727-layer names now fill the big-name card; the header keeps its own title. */
+    if (panel->main_notice == 1) { /* wherever MAIN was turned, the header names it and its value */
+        unsigned m = panel->sound.master, n = 5;
+        if (m >= 100u) main_title[n++] = (char)('0' + m / 100u);
+        if (m >= 10u) main_title[n++] = (char)('0' + m / 10u % 10u);
+        main_title[n++] = (char)('0' + m % 10u);
+        main_title[n] = 0;
+        title = main_title;
+    }
     step_help = "SEQ+PARA DILLO  SEQ+FX 808";
 #endif
     const char *activity = sound->clock.source == TG_CLOCK_USB && sound->clock.state == TG_CLOCK_LOST ? "LOST" :
@@ -304,16 +314,92 @@ static void draw_instrument_page(uint16_t *pixels, const struct panel *panel,
     view_telegram(pixels, panel, head, note, rate_name, step_help);
 }
 
+#ifdef ELITE_DRUMS808
+/* The big-name flash: for a moment after a stepped change (a song part, the 727 layer, MAIN), its
+ * name fills a card across the middle of the screen, then the page comes back. Presentation only:
+ * it reads what the panel already holds and changes nothing. A part still waiting for its bar says
+ * NEXT; once the band is on it, NOW. */
+static void view_flash(uint16_t *pixels, const struct panel *panel)
+{
+    if (!panel->main_notice) return;
+    char caption[TG_NAME_BYTES + 16], value[8];
+    const char *name = 0;
+    unsigned n = 0;
+    caption[0] = 0;
+#if defined(ELITE_PERCUSSION_727) && defined(ELITE_BAND_PRESETS)
+    if (panel->main_notice == 3 && panel->band_last) {
+        unsigned at = panel->band_last - 1u, page = band_page_of(at);
+        const struct band_preset_group *group = &factory_band_groups[band_page_group(page)];
+        const char *state = panel->flash_kept ? "EDIT KEPT  REC+> BRINGS IT BACK" : panel->band_preset ? "NEXT  " : "NOW  ";
+        while (*state) caption[n++] = *state++;
+        if (!panel->flash_kept) {
+            unsigned part = at - group->start + 1u;
+            if (part >= 10u) caption[n++] = (char)('0' + part / 10u % 10u);
+            caption[n++] = (char)('0' + part % 10u);
+            caption[n++] = '/';
+            if (group->count >= 10u) caption[n++] = (char)('0' + group->count / 10u % 10u);
+            caption[n++] = (char)('0' + group->count % 10u);
+            caption[n++] = ' ';
+            caption[n++] = ' ';
+            char title[TG_NAME_BYTES + 4];
+            band_title(page, title);
+            for (unsigned i = 0; title[i] && n < sizeof caption - 1u; i++) caption[n++] = title[i];
+        }
+        caption[n] = 0;
+        name = factory_band_presets[at].name;
+    } else if (panel->main_notice == 4) {
+        /* A launch held back: it would replace an edit already waiting as a draft. */
+        const char *c = "AN EARLIER EDIT WAITS AS A DRAFT";
+        while (*c) caption[n++] = *c++;
+        caption[n] = 0;
+        name = "PRESS AGAIN";
+    } else if (panel->main_notice == 2) {
+        const char *c = "727 LAYER  K4";
+        while (*c) caption[n++] = *c++;
+        caption[n] = 0;
+        name = panel->band_layer ? layer_rhythm_names[panel->band_layer - 1u] : "OFF";
+    } else
+#endif
+    if (panel->main_notice == 1) {
+        const char *c = "MAIN LEVEL";
+        while (*c) caption[n++] = *c++;
+        caption[n] = 0;
+        unsigned m = panel->sound.master, v = 0;
+        if (m >= 100u) value[v++] = (char)('0' + m / 100u % 10u);
+        if (m >= 10u) value[v++] = (char)('0' + m / 10u % 10u);
+        value[v++] = (char)('0' + m % 10u);
+        value[v] = 0;
+        name = value;
+    }
+    if (!name) return;
+    const struct view_livery *liv = view_livery(panel);
+    enum { FLASH_Y = 86, FLASH_H = 68 };
+    view_rect(pixels, 0, FLASH_Y, VIEW_W, FLASH_H, CHROME_BAND);
+    view_rect(pixels, 0, FLASH_Y, VIEW_W, 3, liv->accent);
+    view_rect(pixels, 0, FLASH_Y + FLASH_H - 1, VIEW_W, 1, liv->accent);
+    unsigned len = 0;
+    while (caption[len]) len++;
+    while (len && view_small_width(caption) > VIEW_W - 16) caption[--len] = 0;
+    view_small(pixels, 8, FLASH_Y + 9, caption,
+               panel->main_notice == 4 || (panel->main_notice == 3 && panel->band_preset) ? CHROME_808_YELLOW : CORAL);
+    jukebox_big(pixels, 8, FLASH_Y + 26, VIEW_W - 16, name, CHROME_CREAM);
+}
+#endif
+
 static void draw_instrument(uint16_t *pixels, const struct panel *panel,
                             unsigned head, unsigned note, unsigned fault, unsigned safe, unsigned beat)
 {
     draw_instrument_page(pixels, panel, head, note, fault, safe, beat);
 #ifdef ELITE_DRUMS808
-    if (!fault && !safe && !panel->key_transpose_armed) {
+    if (!fault && !safe && panel->perform_view) {
+        view_perform_map(pixels, panel);
+        view_footer(pixels, panel);
+    } else if (!fault && !safe && !panel->key_transpose_armed) {
         view_focus(pixels, panel);
         if (view_globe_map_visible(panel)) view_globe_map(pixels, panel);
         view_footer(pixels, panel);
     }
-    view_dillo_wallpaper(pixels, view_livery(panel)); /* the Dillo is always there, behind the page */
+    view_dillo_wallpaper(pixels, view_livery(panel), panel->main_notice == 3); /* always there; lit on a new part */
+    if (!fault && !safe && !panel->perform_view && !panel->key_transpose_armed) view_flash(pixels, panel);
 #endif
 }

@@ -188,16 +188,34 @@ static uint16_t view_stage_ground(const uint16_t *pixels)
 }
 
 /* Behind every page: the Dillo, large and faint, in the page's own ink. */
-static void view_dillo_wallpaper(uint16_t *pixels, const struct view_livery *liv)
+enum { DILLO_BEHIND, DILLO_GLOW, DILLO_GHOST };
+#ifndef ELITE_DILLO_GLOW
+#define ELITE_DILLO_GLOW DILLO_GLOW
+#endif
+static uint8_t dillo_glow = ELITE_DILLO_GLOW;
+static void view_dillo_wallpaper(uint16_t *pixels, const struct view_livery *liv, unsigned lit)
 {
 #ifdef ELITE_NO_DILLO_WALLPAPER /* timing fallback: the header mark and playhead rider stay */
-    (void)pixels; (void)liv;
+    (void)pixels; (void)liv; (void)lit;
     return;
 #endif
     uint16_t ground = view_stage_ground(pixels);
     if (!ground && pixels[182 * VIEW_W + 2]) return;
-    view_dillo_mask(pixels, VIEW_W - DILLO_WALL_W - 4, 26, dillo_wall, dillo_wall_span, DILLO_WALL_W, DILLO_WALL_H, DILLO_WALL_BITS,
-                    liv->ink, 3u, 19, 184, 1, ground);
+    int x = VIEW_W - DILLO_WALL_W - 4;
+    if (dillo_glow == DILLO_BEHIND) {
+        view_dillo_mask(pixels, x, 26, dillo_wall, dillo_wall_span, DILLO_WALL_W, DILLO_WALL_H, DILLO_WALL_BITS,
+                        liv->ink, 3u, 19, 184, 1, ground);
+    } else if (dillo_glow == DILLO_GLOW) {
+        /* He glows through the panels: the same faint ink over everything on the stage. */
+        view_dillo_mask(pixels, x, 26, dillo_wall, dillo_wall_span, DILLO_WALL_W, DILLO_WALL_H, DILLO_WALL_BITS,
+                        liv->ink, lit ? 7u : 3u, 19, 184, 0, 0); /* lit: he lights up when the band moves on */
+    } else {
+        /* Clearer on the open stage, and a ghost across the panels. */
+        view_dillo_mask(pixels, x, 26, dillo_wall, dillo_wall_span, DILLO_WALL_W, DILLO_WALL_H, DILLO_WALL_BITS,
+                        liv->ink, 2u, 19, 184, 0, 0);
+        view_dillo_mask(pixels, x, 26, dillo_wall, dillo_wall_span, DILLO_WALL_W, DILLO_WALL_H, DILLO_WALL_BITS,
+                        liv->ink, 3u, 19, 184, 1, ground);
+    }
 }
 
 static void view_header_motion(uint16_t *pixels, const struct panel *panel, unsigned beat)
@@ -238,11 +256,13 @@ static void view_header(uint16_t *pixels, const struct panel *panel, const char 
 static int view_keycap(uint16_t *pixels, int x, const char *key, const char *action,
                        const struct view_livery *liv)
 {
-    int w = view_small_width(key) + 4;
-    view_rect(pixels, x + 1, 224, w - 2, 12, liv->chip);
-    view_rect(pixels, x, 225, w, 10, liv->chip);
-    view_small(pixels, x + 2, 227, key, liv->chip_ink);
-    return view_small(pixels, x + w + 3, 227, action, liv->ink) + 6;
+    /* The hint row is read from arm's length: the middle face, chip and words. */
+    int w = view_picnic_width(key, &picnic_M) + 6;
+    if (x + w + 4 + view_picnic_width(action, &picnic_M) > VIEW_W) return VIEW_W; /* whole hints or none */
+    view_rect(pixels, x + 1, 221, w - 2, 19, liv->chip);
+    view_rect(pixels, x, 222, w, 17, liv->chip);
+    view_picnic(pixels, x + 3, 221, key, &picnic_M, liv->chip_ink);
+    return view_picnic(pixels, x + w + 4, 221, action, &picnic_M, liv->ink) + 8;
 }
 
 static void view_knob_cell(uint16_t *pixels, unsigned slot, const char *label, unsigned value,

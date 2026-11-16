@@ -2,6 +2,8 @@
 /* Foreground owns panel edits. Only a complete snapshot crosses to audio. */
 #include "../synth/store101.h"
 #include "../synth/catalog101.h"
+#include "../synth/learn101.h"
+#include "../synth/perform101.h"
 #ifdef ELITE_DILLO
 #include "../dillo/layer303.h"
 #endif
@@ -54,6 +56,8 @@ struct panel {
     uint8_t audition_step, audition_velocity, audition_strike; /* Step index plus one. */
     uint8_t preset_bank, pad_light, hold, clock_toggle;
     uint8_t knob_map[2][8], fader_map[4][4], assign_slot, assign_source;
+    tg_cc_map cc_map;               /* MIDI learn (ASSIGN): for this session; the journal has no room to keep it */
+    uint8_t cc_full;                /* a seventeenth CC was sent on ASSIGN */
     uint8_t pad_note[TG_PADS], pad_keys, pad_lead;
     uint16_t pads_down;
     uint8_t repeat_on, repeat_latch, repeat_latched, repeat_gesture, repeat_edit;
@@ -65,6 +69,13 @@ struct panel {
     uint16_t library_slot, imported_slot;
     uint8_t user_sound, user_slot, name_cursor, store_request, library_dirty, scene_sound;
     uint8_t pedal_mode, pedal_down;
+    uint8_t clock_out;              /* GLOBAL > CLOCK OUT: send MIDI clock and Start/Stop from the internal transport */
+    /* PERFORM (hold FX, play the lowest octave; synth/perform101.h): the buffer effect held last + 1 (0 none),
+     * LPF/HPF bits, muted parts (Telegram, Dillo, 808 A, 808 B), and whether the map is on screen. */
+    uint8_t perform_fx, perform_filters, perform_mutes, perform_view;
+    /* The Band link: a Band preset pad sends Program Change (preset - 1) on the keys channel, so a second
+     * machine can follow; band_pc_seq counts launches so the same preset can be sent again. */
+    uint8_t band_pc, band_pc_seq;
 #ifdef ELITE_DILLO
     dillo_phrase dillo_pattern;
     uint8_t dillo_enabled, dillo_cursor, dillo_record, dillo_undo;
@@ -122,6 +133,17 @@ struct panel {
     uint32_t held_buttons, view_frames, strip_frame; /* Redesign strip: modifiers held, last knob turned. */
     uint32_t globe_frame; /* when GLOBE went down: a long hold draws the shift map */
     uint8_t strip_knob;
+    uint8_t main_notice; /* MAIN just moved: the header shows its value, from any page */
+    uint16_t band_last;  /* the Band part loaded last (index + 1): the Band arrows step its song */
+    uint8_t band_hold_pad; /* Band pad held (pad + 1): held long, it opens that instrument */
+    uint32_t band_hold_frame;
+    uint8_t band_layer;  /* Band K4: 0 off, else the 727 layer rhythm playing over the song */
+    uint8_t layer_mix[8]; /* 727 page: bombo, guiro, campana, bongos, congas, timbales, -, level; 100 unity */
+    uint8_t layer_combo, layer_last_pad; /* a second rhythm combined CR-8000 style (index + 1) */
+    uint32_t layer_last_frame;
+    uint32_t main_notice_frame;
+    uint32_t band_guard_frame; /* when a launch was held back to protect a waiting draft */
+    uint8_t band_guard, flash_kept; /* guard armed; the last launch kept edits as drafts */
     uint8_t scene_cleanup;
     conductor_assets scene_cleanup_assets;
     uint32_t conductor_edits, conductor_save_edits;
@@ -148,6 +170,30 @@ static unsigned drum_part(const struct panel *panel)
     return ELITE_DRUM_PARTS > 1 && panel->drums_focus;
 }
 #endif
+
+/* Knob acceleration for continuous values: one click at a time stays one step, a quick spin covers
+ * far more (2 clicks in one read count 4, 3 count 9, 4 or more count 4 each), so a full 0-127 sweep is
+ * about one turn. Lists and choices never use it. */
+#ifndef KNOB_SPEED_DEFAULT
+#define KNOB_SPEED_DEFAULT 1
+#endif
+static uint8_t knob_speed_on = KNOB_SPEED_DEFAULT; /* the older host tests drive knobs click-for-click */
+/* Tempo keeps single steps when turned slowly (one BPM a click) and speeds up when spun. */
+static int knob_fine(int delta)
+{
+    if (!knob_speed_on) return delta;
+    int a = delta < 0 ? -delta : delta;
+    return delta * (a > 4 ? 4 : a);
+}
+static int knob_speed(int delta)
+{
+    if (!knob_speed_on) return delta;
+    /* A slow click moves 3, a quick spin up to
+     * 6 per click, so 0-127 is under two turns slowly and well under one at speed. */
+    int a = delta < 0 ? -delta : delta;
+    int per = a <= 1 ? 3 : a == 2 ? 4 : a == 3 ? 5 : 6;
+    return delta * per;
+}
 
 #define STARTUP_STEPS {36, 0, 48, 36 | TG_TIE, 43, 0, 36, 0, 36, 48, 0, 43, 39, 0, 46, 0}
 
@@ -373,10 +419,12 @@ static unsigned conductor_capture_draft(const struct panel *panel, unsigned lane
     return slot + 1u;
 }
 
+static uint32_t conductor_stashes; /* edits kept as drafts, counted: a launch reports when it kept one */
 static void conductor_stash_pattern(struct panel *panel, unsigned lane)
 {
     unsigned source = conductor_capture_draft(panel, lane, &conductor_drafts[lane]);
     if (!source) return;
+    conductor_stashes++;
     panel->draft_slot[lane] = (uint8_t)source;
     if (lane == MIX_TELEGRAM) panel->telegram_draft_library = panel->telegram_library;
 }
@@ -950,7 +998,7 @@ static void conductor_editor(struct panel *panel, unsigned target)
 enum { HOME_PAGE = PAGE_TONE };
 #endif
 
-enum { MAP_KNOB, MAP_FADER, MAP_PAD };
+enum { MAP_KNOB, MAP_FADER, MAP_PAD, MAP_CC };
 enum { FADER_PAGES = 4, CTRL_LEVEL = TG_CONTROL_LEVEL, CTRL_TEMPO = TG_CONTROL_TEMPO, CTRL_OSC_OCTAVE = TG_CONTROL_OSC_OCTAVE, CTRL_KEY_OCTAVE = TG_CONTROL_KEY_OCTAVE, CTRL_ENV_WIDE = TG_CONTROL_ENV_WIDE, CTRL_FILTER_LOW = TG_CONTROL_FILTER_LOW, CTRL_LFO_RETRIGGER = TG_CONTROL_LFO_RETRIGGER, CTRL_FILTER_IDLE_HOLD = TG_CONTROL_FILTER_IDLE_HOLD, CTRL_DRIVE = TG_CONTROL_DRIVE, CTRL_FILTER_ATTACK = TG_CONTROL_FILTER_ATTACK, CTRL_ACCENT_TONE = TG_CONTROL_ACCENT_TONE, CTRL_ACCENT_LEVEL = TG_CONTROL_ACCENT_LEVEL, CTRL_PWM_SOURCE = TG_CONTROL_PWM_SOURCE, CTRL_COUNT = TG_CONTROL_COUNT };
 
 enum { MIDI_CHANNELS = 16, PROFILE_FIRST_KEY = 16, SCALE_FIRST_KEY = 24, SCALE_ROOTS = 12, RATE_FIRST_KEY = 24 };
@@ -1041,7 +1089,9 @@ static void init_map(struct panel *panel)
     panel->mixer = (conductor_mixer)CONDUCTOR_MIX_DEFAULT;
     drum_kit_default(&panel->drums_kit);
     drum_kit_default(&panel->drums_b.kit);
-    panel->drums_b.mix[MIX_LEVEL] = 90;
+    panel->drums_b.mix[MIX_LEVEL] = 110; /* the 727 layer's own level (K8 on the 727 page trims it) */
+    for (unsigned i = 0; i < 8; i++) panel->layer_mix[i] = 100;
+    panel->layer_last_pad = 0xff;
     panel->drums_b.mix[MIX_PAN] = 64;
     panel->dillo_sound = (dillo_sound){.tone = bb_dillo_bank[DILLO_DEFAULT_SOUND].sound};
     panel->dillo_sound_slot = DILLO_DEFAULT_SOUND;
@@ -1077,6 +1127,10 @@ static unsigned control_value(const tg_controls *sound, unsigned control)
 static tg_keyboard keyboard, held_keyboard;
 /* A shortcut owns its keys until release, even after its modifier is let go. */
 static uint64_t transpose_down, transpose_keys;
+/* PERFORM: keys the layer owns (they play no note until let go); the page FX left; whether keys were used. */
+static uint64_t perform_owned;
+static uint8_t perform_page_before, perform_used, perform_fx_was_held;
+static uint32_t perform_fx_frame;
 static tg_latch held_chord, arp_chord;
 static uint64_t key_order_mask;
 static uint8_t key_order[TG_KEYS], key_order_count;
@@ -1214,6 +1268,20 @@ static void set_control(tg_controls *sound, unsigned control, int value)
         sound->patch.value[control] = (uint8_t)bounded(value, 0, 127);
         if (control == TG_GLIDE && !sound->patch.glide_mode) sound->patch.glide_mode = TG_GLIDE_AUTO;
     }
+}
+
+/* A control on a fader's 0-127 scale, and back (tempo spans 30-300; switches and five-way controls
+ * step). The faders and learned MIDI CCs share these. */
+static unsigned control_target127(const tg_controls *sound, unsigned p)
+{
+    unsigned value = control_value(sound, p);
+    return p == CTRL_TEMPO ? ((value - 30u) * 127u + 135u) / 270u : control_switch(p) ? value * 127u :
+           control_five_positions(p) ? (value * 127u + 2u) / 4u : value;
+}
+static int control_from127(unsigned p, unsigned to)
+{
+    return p == CTRL_TEMPO ? 30 + (int)(to * 270u / 127u) : control_switch(p) ? (int)(to >= 64u) :
+           control_five_positions(p) ? (int)((to * 4u + 63u) / 127u) : (int)to;
 }
 
 static void select_preset(struct panel *panel, unsigned index)
@@ -1377,7 +1445,9 @@ struct band_preset {
 struct band_preset_group {
     char name[TG_NAME_BYTES];
     uint16_t start, count;
+    uint8_t kind; /* BAND_SONG, BAND_MACHINE or BAND_ERA: the LOAD list's collections */
 };
+enum { BAND_SONG, BAND_MACHINE, BAND_ERA };
 #include "factory_band_presets.inc"
 
 static unsigned conductor_band_count(void)
@@ -1434,7 +1504,7 @@ static const bb_dillo_patch *dillo_studio_sound(unsigned at)
 static const char *dillo_studio_sound_name(unsigned at)
 {
     for (unsigned i = 0; i < sizeof studio_dillo_index; i++)
-        if (studio_dillo_index[i] == at) return factory_dillo_phrases[studio_dillo_start + i].name;
+        if (studio_dillo_index[i] == at) return factory_dillo_name(studio_dillo_start + i);
     return "STUDIO";
 }
 
@@ -1457,7 +1527,7 @@ static unsigned dillo_pattern_sound(unsigned phrase)
         if (dillo_pattern_sounds[mid].phrase < phrase) lo = mid + 1u; else hi = mid;
     }
     if (lo == sizeof dillo_pattern_sounds / sizeof dillo_pattern_sounds[0] || dillo_pattern_sounds[lo].phrase != phrase ||
-        dillo_name_differs(dillo_pattern_sounds[lo].name, factory_dillo_phrases[phrase].name, TG_NAME_BYTES) ||
+        dillo_name_differs(dillo_pattern_sounds[lo].name, factory_dillo_name(phrase), TG_NAME_BYTES) ||
         dillo_pattern_sounds[lo].slot >= dillo_sound_total())
         return 0;
     return dillo_pattern_sounds[lo].slot + 1u;
@@ -1489,9 +1559,42 @@ static void conductor_finish_studio(struct panel *panel)
 
 /* The foreground publishes these three generations together. Only the
  * existing working patterns are replaced. Library slots are copied by REC. */
+enum { BAND_GUARD_FRAMES = 1875 }; /* 3 s at 625 frames a second */
+
+/* A launch keeps each edited working pattern as its lane's draft (REC+> brings it back). Only when a
+ * lane already holds a draft would that older edit be lost: the first press then only warns (PRESS
+ * AGAIN), and a second press within three seconds goes ahead. */
+static unsigned band_launch_guarded(struct panel *panel)
+{
+    static const uint8_t lanes[] = {MIX_808, MIX_DILLO, MIX_TELEGRAM};
+    unsigned at_risk = 0;
+    for (unsigned i = 0; i < sizeof lanes; i++) {
+        unsigned lane = lanes[i];
+        if (!panel->draft_slot[lane] || !conductor_pattern_edited(panel, lane)) continue;
+        if (lane == MIX_TELEGRAM && panel->telegram_library) {
+            const tg_saved_phrase *saved;
+            if (!tg_library_find_phrase(&user_library, panel->telegram_library - 1u, &saved) &&
+                conductor_phrase_matches(panel, saved)) continue;
+        }
+        at_risk = 1;
+    }
+    if (!at_risk) return 0;
+    if (panel->band_guard && fm1_in.frames - panel->band_guard_frame < BAND_GUARD_FRAMES) {
+        panel->band_guard = 0;
+        return 0;
+    }
+    panel->band_guard = 1;
+    panel->band_guard_frame = fm1_in.frames;
+    panel->main_notice = 4;
+    panel->main_notice_frame = fm1_in.frames;
+    return 1;
+}
+
 static int conductor_cue_band_preset(struct panel *panel, unsigned index)
 {
     if (index >= conductor_band_count()) return 0;
+    if (band_launch_guarded(panel)) return 0;
+    uint32_t stashes_before = conductor_stashes;
     const struct band_preset *row = &factory_band_presets[index];
     static const tg_saved_phrase rest_lead = {.length = DRUM_STEPS};
     static const dillo_phrase rest_bass = {.length = DRUM_STEPS};
@@ -1500,15 +1603,19 @@ static int conductor_cue_band_preset(struct panel *panel, unsigned index)
     conductor_stash_pattern(panel, MIX_TELEGRAM);
     conductor_replace_pattern(panel, MIX_808, panel->drums_slot, &factory_band_drums[row->drums]);
     conductor_replace_pattern(panel, MIX_DILLO, panel->dillo_slot,
-        row->dillo == UINT16_MAX ? &rest_bass : &factory_dillo_phrases[row->dillo].phrase);
+        row->dillo == UINT16_MAX ? &rest_bass : factory_dillo_phrase(row->dillo));
     conductor_replace_pattern(panel, MIX_TELEGRAM, panel->telegram_slot,
         row->telegram == UINT16_MAX ? &rest_lead : &factory_telegram_phrases[row->telegram]);
     drum_kit_default(&panel->band_kit);
     static const uint8_t alternate[] = {D8S_LC, D8S_MC, D8S_HC, D8S_CL, D8S_MA};
     for (unsigned bit = 0; bit < sizeof alternate; ++bit)
         if (row->alternate & (1u << bit)) drum_kit_select_sound(&panel->band_kit, alternate[bit]);
-    panel->band_preset = (uint16_t)(index + 1u);
+    panel->band_preset = panel->band_last = (uint16_t)(index + 1u);
     panel->scene_active = 0;
+    panel->flash_kept = conductor_stashes != stashes_before;
+    panel->band_guard = 0;
+    panel->main_notice = 3; /* every song or part launch flashes its name */
+    panel->main_notice_frame = fm1_in.frames;
     conductor_changed(panel);
     return 1;
 }
@@ -1560,31 +1667,30 @@ static unsigned synth_preset_sources(const struct panel *panel)
 }
 
 #ifdef ELITE_ACID_DUETS
-enum { DUET_PADS = 8, DUET_COUNT = sizeof factory_synth_duets / sizeof factory_synth_duets[0] };
-
-/* Acid Duets is the last source in both browsers. Each group can span pages. */
+enum { DUET_PADS = 16, DUET_COUNT = sizeof factory_synth_duets / sizeof factory_synth_duets[0] };
 static unsigned synth_preset_duets(const struct panel *panel)
 {
     return panel->synth_preset_group == synth_preset_sources(panel);
 }
 
+/* Acid Duets: sixteen to a page, every pad a whole duet (bass and lead together). */
 static unsigned duet_groups(void)
 {
-    return sizeof factory_synth_duet_pages / sizeof factory_synth_duet_pages[0];
+    return (DUET_COUNT + DUET_PADS - 1u) / DUET_PADS;
 }
 
 static unsigned duet_group_start(unsigned page, unsigned *count)
 {
-    *count = factory_synth_duet_pages[page].count;
-    return factory_synth_duet_pages[page].start;
+    unsigned start = page * DUET_PADS;
+    *count = start >= DUET_COUNT ? 0 : DUET_COUNT - start < DUET_PADS ? DUET_COUNT - start : DUET_PADS;
+    return start;
 }
 
-/* Both pad rows show the group's parts: one-based duet index, or zero. */
+/* One-based duet index under a pad, or zero. */
 static unsigned duet_at(const struct panel *panel, unsigned pad)
 {
     unsigned count, start = duet_group_start(panel->synth_preset_page, &count);
-    unsigned part = pad % DUET_PADS;
-    return part < count ? start + part + 1u : 0;
+    return pad < count ? start + pad + 1u : 0;
 }
 #else
 static unsigned synth_preset_duets(const struct panel *panel) { (void)panel; return 0; }
@@ -1673,7 +1779,7 @@ static void conductor_synth_preset_pad(struct panel *panel, unsigned pad)
     if (!index) return;
     if (panel->synth_preset_dillo) {
         conductor_stash_pattern(panel, MIX_DILLO);
-        conductor_replace_pattern(panel, MIX_DILLO, panel->dillo_slot, &factory_dillo_phrases[index - 1u].phrase);
+        conductor_replace_pattern(panel, MIX_DILLO, panel->dillo_slot, factory_dillo_phrase(index - 1u));
 #ifdef ELITE_BAND_PRESETS
         if (conductor_studio_dillo_patch(index - 1u)) panel->studio_dillo_pending = (uint16_t)index;
         else panel->dillo_sound_cue = (uint8_t)dillo_pattern_sound(index - 1u);
@@ -1739,9 +1845,9 @@ static void synth_spin(struct panel *panel, int delta)
 static const char *synth_entry_name(const struct panel *panel, unsigned index)
 {
 #ifdef ELITE_ACID_DUETS
-    if (synth_preset_duets(panel)) return factory_dillo_phrases[factory_synth_duets[index].bass].name;
+    if (synth_preset_duets(panel)) return factory_dillo_name(factory_synth_duets[index].bass);
 #endif
-    return panel->synth_preset_dillo ? factory_dillo_phrases[index].name : factory_telegram_phrases[index].name;
+    return panel->synth_preset_dillo ? factory_dillo_name(index) : factory_telegram_phrases[index].name;
 }
 
 /* One 16-step row: LANE_* per step and its pitch (0 for none). */
@@ -1750,7 +1856,7 @@ static void synth_phrase_row(unsigned dillo, unsigned phrase, uint8_t lane[DRUM_
     memset(lane, 0, DRUM_STEPS);
     memset(pitch, 0, DRUM_STEPS);
     if (dillo) {
-        const dillo_phrase *p = &factory_dillo_phrases[phrase].phrase;
+        const dillo_phrase *p = factory_dillo_phrase(phrase);
         unsigned last = 0;
         for (unsigned step = 0; step < DRUM_STEPS && step < p->length; step++) {
             const dillo_step *e = &p->steps[step];
@@ -1775,7 +1881,7 @@ static void synth_phrase_notes(unsigned dillo, unsigned phrase, struct synth_not
 {
     unsigned have = out->notes != 0;
     if (dillo) {
-        const dillo_phrase *p = &factory_dillo_phrases[phrase].phrase;
+        const dillo_phrase *p = factory_dillo_phrase(phrase);
         for (unsigned step = 0; step < p->length && step < DILLO_STEPS; step++) {
             const dillo_step *e = &p->steps[step];
             if (e->event != DILLO_NOTE) continue;
@@ -1807,7 +1913,7 @@ static int conductor_cue_duet(struct panel *panel, unsigned index)
     conductor_stash_pattern(panel, MIX_DILLO);
     conductor_stash_pattern(panel, MIX_TELEGRAM);
     conductor_replace_pattern(panel, MIX_DILLO, panel->dillo_slot,
-                              &factory_dillo_phrases[factory_synth_duets[index].bass].phrase);
+                              factory_dillo_phrase(factory_synth_duets[index].bass));
     conductor_replace_pattern(panel, MIX_TELEGRAM, panel->telegram_slot,
                               &factory_telegram_phrases[factory_synth_duets[index].lead]);
     panel->sound.transpose = 0;
@@ -1816,9 +1922,9 @@ static int conductor_cue_duet(struct panel *panel, unsigned index)
     return 1;
 }
 
-/* Acid Duets pads. Pads 1-8 cue the part's bass and lead together at the next bar,
- * with the lead's own patch and level; CHORD keeps the current sound and mix.
- * Pads 9-16 load only this browser's half of the part. Stopped on internal clock,
+/* Acid Duets pads. Every pad cues a whole duet, bass and lead together, at the next bar,
+ * with the lead's own patch and level; CHORD keeps the current sound and mix. One half alone
+ * lives in each instrument's Patterns list. Stopped on internal clock,
  * any pad starts the transport so the choice is heard at once. Keyboard focus
  * never moves. REC + a Band pad keeps a copy, as for any phrase. */
 static void conductor_duet_pad(struct panel *panel, unsigned pad, unsigned keep_sound)
@@ -1840,7 +1946,7 @@ static void conductor_duet_pad(struct panel *panel, unsigned pad, unsigned keep_
     } else if (panel->synth_preset_dillo) {
         conductor_stash_pattern(panel, MIX_DILLO);
         conductor_replace_pattern(panel, MIX_DILLO, panel->dillo_slot,
-                                  &factory_dillo_phrases[factory_synth_duets[duet].bass].phrase);
+                                  factory_dillo_phrase(factory_synth_duets[duet].bass));
 #ifdef ELITE_BAND_PRESETS
         if (!keep_sound) panel->dillo_sound_cue = (uint8_t)dillo_pattern_sound(factory_synth_duets[duet].bass);
 #endif
@@ -1867,8 +1973,29 @@ static void conductor_duet_pad(struct panel *panel, unsigned pad, unsigned keep_
  * LATIN layer rhythms (B's transport, LATIN row order) and the BB1 Band presets (all
  * three parts at the downbeat). A Band page never mixes two song or era groups. */
 enum { RHYTHM_STUDIO, RHYTHM_LAYER, RHYTHM_BAND };
+enum { LAYER_CHORD_FRAMES = 190, LAYER_GROUPS = 6 }; /* pads within 0.3 s combine */
+/* The 727's eleven tracks in six knob groups: bombo, guiro, campana, bongos, congas, timbales. */
+static const uint8_t layer_track_group[11] = {0, 1, 2, 4, 3, 3, 4, 4, 4, 5, 5};
+static const char *const layer_group_name[8] = {"BOMB", "GUIR", "CAMP", "BONG", "CONG", "TIMB", 0, "LVL"};
 #ifdef ELITE_PERCUSSION_727
 #include "layer_rhythms.inc"
+
+/* K4 on the Band and on the song list: the 727 layer, one name per click, OFF first. It plays over
+ * whatever is running and does not touch the other parts. */
+static void band_layer_turn(struct panel *panel, int delta)
+{
+    if (!panel->layer_available) return;
+    int next = bounded((int)panel->band_layer + (delta > 0 ? 1 : -1), 0, LAYER_RHYTHM_COUNT);
+    if (next == panel->band_layer) return;
+    panel->band_layer = (uint8_t)next;
+    if (next) {
+        conductor_cue_layer_rhythm(panel, &layer_rhythms[next - 1]);
+        panel->drums_b.muted = 0;
+    } else {
+        panel->drums_b.muted = 1;
+    }
+    conductor_changed(panel);
+}
 #endif
 
 #ifdef ELITE_BAND_PRESETS
@@ -1906,6 +2033,82 @@ static unsigned band_page_of(unsigned index)
     }
     return 0;
 }
+/* LOAD > SONGS is two levels: a title (one Band page: a song, a machine bank or an era, numbered when it
+ * runs past 16 parts) on K1, its parts on the pads. The arrows jump between the three collections. */
+static const char *const band_kind_name[3] = {"SONGS", "MACHINES", "ERAS"};
+
+static unsigned band_page_group(unsigned page)
+{
+    unsigned count, group = 0;
+    band_page_rows(page, &count, &group);
+    return group;
+}
+
+static unsigned band_page_kind(unsigned page)
+{
+    return factory_band_groups[band_page_group(page)].kind;
+}
+
+/* The Band arrows: the whole band to the song's next or previous part, wrapping, at the bar. */
+static int band_step_part(struct panel *panel, int arrow)
+{
+    if (!panel->band_last) return 0;
+    unsigned at = panel->band_last - 1u;
+    const struct band_preset_group *group = &factory_band_groups[band_page_group(band_page_of(at))];
+    if (!group->count || at < group->start || at >= group->start + group->count) return 0;
+    unsigned next = group->start + (at - group->start + group->count + (unsigned)(arrow > 0 ? 1 : group->count - 1u)) % group->count;
+    if (!conductor_cue_band_preset(panel, next)) return panel->main_notice == 4; /* held back: the warning shows */
+    if (next < 128u) { panel->band_pc = (uint8_t)next; panel->band_pc_seq++; }
+    panel->main_notice = 3;
+    panel->main_notice_frame = fm1_in.frames;
+    return 1;
+}
+
+/* "TR-66 3" for the third page of a bank; the song's own name when it fits on one page. */
+static const char *band_title(unsigned page, char out[TG_NAME_BYTES + 4])
+{
+    unsigned group = band_page_group(page), first = page, count;
+    while (first && band_page_group(first - 1u) == group) first--;
+    const char *name = factory_band_groups[group].name;
+    unsigned at = 0;
+    while (name[at] && at < TG_NAME_BYTES) { out[at] = name[at]; at++; }
+    if (factory_band_groups[group].count > DRUM_PRESET_PAGE) {
+        unsigned n = page - first + 1u;
+        out[at++] = ' ';
+        if (n > 9u) out[at++] = (char)('0' + n / 10u);
+        out[at++] = (char)('0' + n % 10u);
+    }
+    out[at] = 0;
+    (void)count;
+    return out;
+}
+
+/* Position of the page among its collection's titles, and how many there are (both one-based). */
+static unsigned band_title_place(unsigned page, unsigned *of)
+{
+    unsigned kind = band_page_kind(page), place = 0, total = 0;
+    for (unsigned p = 0; p < band_pages(); p++)
+        if (band_page_kind(p) == kind) { total++; if (p <= page) place++; }
+    *of = total;
+    return place;
+}
+
+static void band_title_spin(struct panel *panel, int delta)
+{
+    int page = (int)panel->drum_preset_bank + delta, pages = (int)band_pages();
+    panel->drum_preset_bank = (uint8_t)(page < 0 ? 0 : page >= pages ? pages - 1 : page);
+    panel->rhythm_cursor = 0;
+}
+
+/* The first title of the next (or previous) collection, wrapping. */
+static void band_collection_jump(struct panel *panel, int dir)
+{
+    unsigned kind = band_page_kind(panel->drum_preset_bank), want = (kind + 3u + (dir > 0 ? 1u : 2u)) % 3u;
+    for (unsigned p = 0; p < band_pages(); p++)
+        if (band_page_kind(p) == want) { panel->drum_preset_bank = (uint8_t)p; break; }
+    panel->rhythm_cursor = 0;
+}
+
 #endif
 
 static unsigned rhythm_banks(const struct panel *panel)
@@ -2019,11 +2222,34 @@ static void rhythm_pad(struct panel *panel, unsigned pad)
     if (!index) return;
     switch (panel->rhythm_source) {
 #ifdef ELITE_PERCUSSION_727
-    case RHYTHM_LAYER: conductor_cue_layer_rhythm(panel, &layer_rhythms[index - 1u]); break;
+    case RHYTHM_LAYER: {
+        /* Two pads together combine, as on the CR-8000: the hits of both rhythms play as one. */
+        unsigned other = panel->layer_last_pad < DRUM_PRESET_PAGE && panel->layer_last_pad != pad &&
+                         fm1_in.frames - panel->layer_last_frame < LAYER_CHORD_FRAMES ?
+                         rhythm_at(panel, panel->layer_last_pad) : 0;
+        if (other && other != index) {
+            drum_pattern both = layer_rhythms[index - 1u];
+            for (unsigned t = 0; t < D8_NUM; t++) {
+                both.hits[t] |= layer_rhythms[other - 1u].hits[t];
+                both.accents[t] |= layer_rhythms[other - 1u].accents[t];
+            }
+            conductor_cue_layer_rhythm(panel, &both);
+            panel->layer_combo = (uint8_t)other;
+        } else {
+            conductor_cue_layer_rhythm(panel, &layer_rhythms[index - 1u]);
+            panel->layer_combo = 0;
+        }
+        panel->layer_last_pad = (uint8_t)pad;
+        panel->layer_last_frame = fm1_in.frames;
+        panel->band_layer = (uint8_t)index; /* Band K4 follows */
+        panel->drums_b.muted = 0;
+        break;
+    }
 #endif
 #ifdef ELITE_BAND_PRESETS
     case RHYTHM_BAND:
         if (!conductor_cue_band_preset(panel, index - 1u)) return;
+        if (index <= 128u) { panel->band_pc = (uint8_t)(index - 1u); panel->band_pc_seq++; }
         /* Browsing is heard at once: stopped on internal clock, a pad starts the band. */
         if (!panel->sound.running && panel->sound.clock.source != TG_CLOCK_USB) panel->sound.running = 1;
         break;
@@ -2121,7 +2347,7 @@ static void rhythm_lanes(const struct panel *panel, unsigned index, uint8_t lane
     if (!band) return;
     const struct band_preset *row = &factory_band_presets[index];
     if (row->dillo != UINT16_MAX) {
-        const dillo_phrase *bass = &factory_dillo_phrases[row->dillo].phrase;
+        const dillo_phrase *bass = factory_dillo_phrase(row->dillo);
         for (unsigned step = 0; step < DRUM_STEPS && step < bass->length; step++) {
             const dillo_step *e = &bass->steps[step];
             lane[1][step] = e->event == DILLO_NOTE ? (e->flags & DILLO_ACCENT ? LANE_ACCENT : LANE_HIT) :
@@ -2146,7 +2372,7 @@ static struct band_notes band_preset_notes(unsigned index)
     const struct band_preset *row = &factory_band_presets[index];
     unsigned have_root = 0;
     if (row->dillo != UINT16_MAX) {
-        const dillo_phrase *bass = &factory_dillo_phrases[row->dillo].phrase;
+        const dillo_phrase *bass = factory_dillo_phrase(row->dillo);
         for (unsigned step = 0; step < bass->length && step < DILLO_STEPS; step++) {
             if (bass->steps[step].event != DILLO_NOTE) continue;
             unsigned pc = bass->steps[step].pitch % 12u;
@@ -2202,6 +2428,12 @@ static unsigned instrument_of_page(unsigned page, const struct panel *panel)
 
 static void pick_instrument(struct panel *panel, unsigned pick, uint32_t frames)
 {
+#if defined(ELITE_PERCUSSION_727)
+    if (ELITE_DRUM_PARTS == 1 && pick == PICK_COUNT && panel->layer_available) {
+        open_rhythms(panel, RHYTHM_LAYER); /* pad 5: the 727 page */
+        return;
+    }
+#endif
     switch (pick) {
     case PICK_TELEGRAM:
         panel->page = PAGE_TONE;
@@ -2738,7 +2970,7 @@ static void library_category(struct panel *panel, int delta)
 enum library_shelf {
     SHELF_SOUNDS, SHELF_BANK, SHELF_PATTERNS, SHELF_DUETS, SHELF_DILLO_SOUNDS, SHELF_DILLO_PATTERNS,
     SHELF_DILLO_DUETS, SHELF_RHYTHMS, SHELF_KITS, SHELF_SETUPS, SHELF_LAYER, SHELF_SONGS, SHELF_COUNT,
-    LIBRARY_SHELVES_MAX = 4
+    LIBRARY_SHELVES_MAX = 8
 };
 static const char *const library_shelf_name[SHELF_COUNT] = {
     [SHELF_SOUNDS] = "SOUNDS", [SHELF_BANK] = "BANK", [SHELF_PATTERNS] = "PATTERNS", [SHELF_DUETS] = "DUETS",
@@ -2753,48 +2985,36 @@ static unsigned library_pick(const struct panel *panel)
     return pick < PICK_COUNT ? pick : PICK_TELEGRAM;
 }
 
+/* LOAD: the same lists in the same order from every instrument. Songs and Setups are the Band's; Duets,
+ * Sounds and Patterns are those of the instrument in front of you (on the Band, the synth with the keys).
+ * PATCH steps through them; BT goes back to where PATCH was pressed. */
 static unsigned library_shelves(const struct panel *panel, uint8_t shelf[LIBRARY_SHELVES_MAX])
 {
-    unsigned n = 0;
-    switch (library_pick(panel)) {
-    case PICK_DILLO:
-        shelf[n++] = SHELF_DILLO_SOUNDS;
-#ifdef ELITE_SYNTH_PRESETS
-        shelf[n++] = SHELF_DILLO_PATTERNS;
+    unsigned n = 0, pick = library_pick(panel);
+    unsigned dillo = pick == PICK_DILLO || (pick == PICK_BAND && panel->conductor_dillo_keys);
+    unsigned drums = pick == PICK_808_A;
+#ifdef ELITE_BAND_PRESETS
+    shelf[n++] = SHELF_SONGS;
 #endif
 #ifdef ELITE_ACID_DUETS
-        shelf[n++] = SHELF_DILLO_DUETS;
+    shelf[n++] = dillo ? SHELF_DILLO_DUETS : SHELF_DUETS;
 #endif
-        break;
-    case PICK_808_A:
+    if (drums) shelf[n++] = SHELF_KITS;
+    else if (dillo) shelf[n++] = SHELF_DILLO_SOUNDS;
+    else {
+        shelf[n++] = SHELF_SOUNDS;
+        if (tg_imported_count()) shelf[n++] = SHELF_BANK;
+    }
+    if (drums) {
         shelf[n++] = SHELF_RHYTHMS;
 #ifdef ELITE_PERCUSSION_727
         if (panel->layer_available) shelf[n++] = SHELF_LAYER;
 #endif
-        shelf[n++] = SHELF_KITS;
-        break;
-    case PICK_BAND:
-        /* The sounds of whichever synth has the keys, then the Band's own shelves. */
-        shelf[n++] = panel->conductor_dillo_keys ? SHELF_DILLO_SOUNDS : SHELF_SOUNDS;
-#ifdef ELITE_BAND_PRESETS
-        shelf[n++] = SHELF_SONGS;
-#endif
-        shelf[n++] = SHELF_SETUPS;
-#ifdef ELITE_ACID_DUETS
-        shelf[n++] = panel->conductor_dillo_keys ? SHELF_DILLO_DUETS : SHELF_DUETS;
-#endif
-        break;
-    default:
-        shelf[n++] = SHELF_SOUNDS;
-        if (tg_imported_count()) shelf[n++] = SHELF_BANK;
-#ifdef ELITE_SYNTH_PRESETS
-        shelf[n++] = SHELF_PATTERNS;
-#endif
-#ifdef ELITE_ACID_DUETS
-        shelf[n++] = SHELF_DUETS;
-#endif
-        break;
     }
+#ifdef ELITE_SYNTH_PRESETS
+    else shelf[n++] = dillo ? SHELF_DILLO_PATTERNS : SHELF_PATTERNS;
+#endif
+    shelf[n++] = SHELF_SETUPS;
     return n;
 }
 
@@ -2856,24 +3076,31 @@ static void library_enter(struct panel *panel, unsigned shelf)
     panel->library_at = panel->page;
 }
 
-/* PATCH opens the library here on its first shelf, steps to the next shelf when it is
- * open, and after the last shelf goes back to where it was pressed. BT goes back at once. */
+/* PATCH opens LOAD at the list used last and steps through the lists, round and round. BT goes back
+ * to where PATCH was pressed. */
 static int library_back(struct panel *panel);
 
 static void library_patch(struct panel *panel)
 {
     uint8_t shelf[LIBRARY_SHELVES_MAX];
+    unsigned n, at = 0;
     if (!library_active(panel)) {
+        /* LOAD opens at the list used last, when this instrument has it; otherwise at the first.
+         * From the Band it always opens at the Songs: the whole band, one press away. */
         panel->library_return = panel->page;
         panel->library_open = 1;
-        library_shelves(panel, shelf);
-        library_enter(panel, shelf[0]);
+        n = library_shelves(panel, shelf);
+#ifdef ELITE_BAND_PRESETS
+        if (panel->page == PAGE_CONDUCTOR) { library_enter(panel, SHELF_SONGS); return; }
+#endif
+        while (at < n && shelf[at] != panel->library_shelf) at++;
+        library_enter(panel, shelf[at < n ? at : 0]);
         return;
     }
-    unsigned n = library_shelves(panel, shelf), at = 0;
+    /* PATCH steps on through the lists and round again; BT leaves. */
+    n = library_shelves(panel, shelf);
     while (at < n && shelf[at] != panel->library_shelf) at++;
-    if (at + 1u >= n) library_back(panel);
-    else library_enter(panel, shelf[at + 1u]);
+    library_enter(panel, shelf[at + 1u < n ? at + 1u : 0]);
 }
 
 /* BT inside the library goes back to where PATCH was pressed. */
@@ -3370,7 +3597,7 @@ static void conductor_mixer_knobs(struct panel *panel)
     tg_controls *sound = &panel->sound;
     unsigned lane = panel->mixer_lane;
     for (unsigned knob = 0; knob < 8; knob++) {
-        int delta = fm1_enc_take(knob);
+        int delta = knob_speed(fm1_enc_take(knob)); /* levels, pan, sends, drive, MAIN */
         if (!delta) continue;
         panel->strip_knob = (uint8_t)(knob + 1u);
         panel->strip_frame = panel->view_frames;
@@ -3393,9 +3620,41 @@ static void conductor_mixer_knobs(struct panel *panel)
 
 static void read_controls_once(struct panel *panel, unsigned head);
 
+enum { MAIN_NOTICE_FRAMES = 750, BAND_HOLD_FRAMES = 375 }; /* 1.2 s; 0.6 s */
+
 static void read_controls(struct panel *panel, unsigned head)
 {
+    unsigned main_before = panel->sound.master;
+#ifdef ELITE_PERCUSSION_727
+    unsigned layer_before = panel->band_layer;
+#endif
     read_controls_once(panel, head);
+#ifdef ELITE_DRUMS808
+    /* A Band pad held for 0.6 s opens its instrument: the part keeps the slot the tap cued. */
+    if (panel->band_hold_pad && panel->page == PAGE_CONDUCTOR &&
+        fm1_in.frames - panel->band_hold_frame >= BAND_HOLD_FRAMES) {
+        unsigned lane = band_pad_lane(panel, panel->band_hold_pad - 1u);
+        panel->band_hold_pad = 0;
+        pick_instrument(panel, lane == MIX_DILLO ? PICK_DILLO : lane == MIX_TELEGRAM ? PICK_TELEGRAM : PICK_808_A,
+                        fm1_in.frames);
+    } else if (panel->page != PAGE_CONDUCTOR) {
+        panel->band_hold_pad = 0;
+    }
+#ifdef ELITE_PERCUSSION_727
+    if (panel->band_layer != layer_before) {
+        panel->main_notice = 2;
+        panel->main_notice_frame = fm1_in.frames;
+    } else
+#endif
+    if (panel->sound.master != main_before) {
+        panel->main_notice = 1;
+        panel->main_notice_frame = fm1_in.frames;
+    } else if (panel->main_notice && fm1_in.frames - panel->main_notice_frame >= MAIN_NOTICE_FRAMES) {
+        panel->main_notice = 0;
+    }
+#else
+    (void)main_before;
+#endif
 #ifdef ELITE_DRUMS808
     /* Leaving the shelf by any route closes LIBRARY, so a later visit there is a plain page. */
     if (panel->library_open && panel->page != panel->library_at) panel->library_open = 0;
@@ -3635,6 +3894,9 @@ static void read_controls_once(struct panel *panel, unsigned head)
 #endif
     if ((pressed & (1u << BTN_FX)) && !drums_shortcut && !drum_focus_shortcut &&
         !(pressed & ((1u << BTN_ASSIGN) | (1u << BTN_PATCH) | (1u << BTN_SEQ) | (1u << SMK_BTN_FADER_BANK)))) {
+        perform_page_before = panel->page;
+        perform_used = 0;
+        perform_fx_frame = frames;
         if (panel->page == PAGE_FX || panel->page == PAGE_MIX) panel->page = panel->fx_return;
 #ifdef ELITE_DRUMS808
         else if (panel->page == PAGE_CONDUCTOR || panel->page == PAGE_DILLO || panel->page == PAGE_DILLO_SOUND || panel->page == PAGE_DRUMS ||
@@ -3779,6 +4041,9 @@ static void read_controls_once(struct panel *panel, unsigned head)
         if (panel->assign_source == MAP_PAD) {
             uint8_t *note = &panel->pad_note[panel->assign_slot];
             *note = (uint8_t)bounded(*note + arrow, 12, 108);
+        } else if (panel->assign_source == MAP_CC) {
+            uint8_t *to = &panel->cc_map.to[panel->assign_slot % TG_LEARN_SLOTS];   /* OFF, then each control */
+            *to = (uint8_t)((*to + CTRL_COUNT + 1 + arrow) % (CTRL_COUNT + 1));
         } else {
             uint8_t *mapping = panel->assign_source == MAP_FADER ?
                 &panel->fader_map[panel->fader_bank][panel->assign_slot] :
@@ -3841,8 +4106,11 @@ static void read_controls_once(struct panel *panel, unsigned head)
     }
 #endif
 #ifdef ELITE_DRUMS808
-    else if (arrow && panel->page == PAGE_DILLO_SOUND)
-        panel->dillo_sound_page ^= 1u;
+    else if (arrow && panel->page == PAGE_DILLO_SOUND) {
+        /* The arrows step the pages of sounds (Factory, Expansion, Classic 303, Devilfish, Studio). */
+        panel->dillo_sound_bank = (uint8_t)((panel->dillo_sound_bank + dillo_sound_banks() + arrow) % dillo_sound_banks());
+        panel->dillo_sound_status = KIT_NORMAL;
+    }
     else if (arrow && panel->page == PAGE_SCENES) {
         panel->scene_cursor = (uint8_t)((panel->scene_cursor + CONDUCTOR_SCENES + arrow) % CONDUCTOR_SCENES);
         panel->scene_status = SCENE_NORMAL;
@@ -3850,7 +4118,11 @@ static void read_controls_once(struct panel *panel, unsigned head)
         unsigned position = conductor_lane_position(panel->mixer_lane);
         panel->mixer_lane = conductor_lane_order[(position + BAND_LANES + arrow) % BAND_LANES];
     }
-    else if (arrow && panel->page == PAGE_CONDUCTOR)
+    else if (arrow && panel->page == PAGE_CONDUCTOR
+#ifdef ELITE_BAND_PRESETS
+             && !band_step_part(panel, arrow)
+#endif
+             )
     {
         int delta = panel->band_bottom ? 2 * arrow : arrow;
         panel->band_bank = (uint8_t)((panel->band_bank + BAND_BANKS + delta) % BAND_BANKS);
@@ -3862,6 +4134,10 @@ static void read_controls_once(struct panel *panel, unsigned head)
             drum_undo_edge = 1;
         } else step_drum_voice(panel, arrow);
     }
+#ifdef ELITE_BAND_PRESETS
+    else if (arrow && panel->page == PAGE_DRUM_PRESETS && panel->rhythm_source == RHYTHM_BAND)
+        band_collection_jump(panel, arrow); /* Songs, Machines, Eras */
+#endif
     else if (arrow && panel->page == PAGE_DRUM_PRESETS)
         { panel->drum_preset_bank = (uint8_t)((panel->drum_preset_bank + rhythm_banks(panel) + arrow) % rhythm_banks(panel)); panel->rhythm_cursor = 0; }
 #ifdef ELITE_SYNTH_PRESETS
@@ -3898,8 +4174,7 @@ static void read_controls_once(struct panel *panel, unsigned head)
         panel->kit_status = KIT_NORMAL;
         panel->globe_tap_pending = 0;
     } else if ((pressed & (1u << BTN_PARA)) && !globe_held && panel->page == PAGE_DILLO_SOUND) {
-        panel->dillo_sound_bank = (uint8_t)((panel->dillo_sound_bank + 1u) % dillo_sound_banks());
-        panel->dillo_sound_status = KIT_NORMAL;
+        panel->dillo_sound_page ^= 1u; /* PARA: the knobs' other page, TONE or MOD, as on every edit page */
     } else if ((pressed & (1u << BTN_PARA)) && panel->page == PAGE_CONDUCTOR) {
         /* PARA mutes: on the Band, the instrument whose pads were touched last. */
         unsigned lane = panel->conductor_lane == PAGE_DILLO ? MIX_DILLO :
@@ -4025,7 +4300,7 @@ static void read_controls_once(struct panel *panel, unsigned head)
 #endif
 #ifdef ELITE_DILLO
         if (panel->page == PAGE_DILLO) {
-            if (k == 0) set_control(sound, CTRL_LEVEL, bounded(sound->master + delta, 0, 127));
+            if (k == 0) set_control(sound, CTRL_LEVEL, bounded(sound->master + knob_speed(delta), 0, 127));
             else if (panel->dillo_record >= DILLO_REC_PITCH) {
                 if (k == 5 && panel->dillo_record == DILLO_REC_TIME) {
                     if (panel->dillo_time_edit || (!globe_held && (buttons & (1u << BTN_TIE)))) {
@@ -4046,6 +4321,7 @@ static void read_controls_once(struct panel *panel, unsigned head)
             dillo_sound before = panel->dillo_sound;
             bb_dillo_patch *patch = &panel->dillo_sound.tone;
             dillo_decay *decay = &panel->dillo_sound.decay;
+            if (!(panel->dillo_sound_page ? k == 4 : k == 6)) delta = knob_speed(delta); /* not the sweep or wave choice */
             if (panel->dillo_sound_page) {
                 if (k == 0) patch->attack_ms = (uint8_t)bounded(patch->attack_ms + delta, 1, 255);
                 else if (k == 1) patch->tracking = (uint8_t)bounded(patch->tracking + delta, 0, 100);
@@ -4079,6 +4355,25 @@ static void read_controls_once(struct panel *panel, unsigned head)
 #endif
         if (panel->page == PAGE_DRUM_PRESETS) {
             /* K1 flicks through the banks; the arrows step them and wrap. */
+#ifdef ELITE_BAND_PRESETS
+            if (k == 0 && panel->rhythm_source == RHYTHM_BAND) { band_title_spin(panel, delta); continue; } /* K1: titles */
+#endif
+#ifdef ELITE_PERCUSSION_727
+            if (k == 3 && panel->rhythm_source == RHYTHM_BAND) { band_layer_turn(panel, delta); continue; } /* K4: 727 */
+#endif
+#ifdef ELITE_PERCUSSION_727
+            if (panel->rhythm_source == RHYTHM_LAYER) {
+                /* The 727 page: one knob per instrument, as on the CR-78, and K8 the whole layer. */
+                if (k < LAYER_GROUPS || k == 7) {
+                    unsigned next = (unsigned)bounded((int)panel->layer_mix[k] + knob_speed(delta), 0, 127);
+                    if (next != panel->layer_mix[k]) {
+                        panel->layer_mix[k] = (uint8_t)next;
+                        conductor_changed(panel);
+                    }
+                }
+                continue;
+            }
+#endif
             if (k == 0) rhythm_spin(panel, delta); /* K1 spins the jukebox; the arrows turn pages */
             continue;
         }
@@ -4121,31 +4416,34 @@ static void read_controls_once(struct panel *panel, unsigned head)
             }
             if (panel->page == PAGE_CONDUCTOR && !panel->drums_repeat && k == 7) {
                 unsigned before = sound->master;
-                set_control(sound, CTRL_LEVEL, sound->master + delta);
+                set_control(sound, CTRL_LEVEL, sound->master + knob_speed(delta));
                 if (sound->master != before) conductor_changed(panel);
             }
+#ifdef ELITE_PERCUSSION_727
+            if (panel->page == PAGE_CONDUCTOR && !panel->drums_repeat && k == 3) band_layer_turn(panel, delta);
+#endif
             if (panel->page == PAGE_CONDUCTOR && !panel->drums_repeat && k == 4) {
                 unsigned before = sound->tempo;
-                set_control(sound, CTRL_TEMPO, sound->tempo + delta);
+                set_control(sound, CTRL_TEMPO, sound->tempo + knob_fine(delta));
                 if (sound->tempo != before) conductor_changed(panel);
             }
             if (panel->drums_repeat && !k) {
                 unsigned before = sound->master;
-                set_control(sound, CTRL_LEVEL, sound->master + delta);
+                set_control(sound, CTRL_LEVEL, sound->master + knob_speed(delta));
                 if (sound->master != before) conductor_changed(panel);
             } else if (panel->page == PAGE_DRUMS && !k && !panel->drums_voice_pick) {
                 step_drum_voice(panel, delta);
             } else if (panel->page == PAGE_CONDUCTOR && !panel->drums_repeat) {
                 if (k < BAND_LANES) {
                     uint8_t *level = conductor_mix_value(panel, conductor_lane_order[k], MIX_LEVEL);
-                    unsigned next = bounded(*level + delta, 0, 127);
+                    unsigned next = bounded(*level + knob_speed(delta), 0, 127);
                     if (*level != next) {
                         *level = (uint8_t)next;
                         conductor_changed(panel);
                     }
                 } else if (k == 5) {
                     int before = sound->patch.value[TG_CUTOFF];
-                    set_control(sound, TG_CUTOFF, before + 2 * delta);
+                    set_control(sound, TG_CUTOFF, before + 2 * knob_speed(delta));
                     if (sound->patch.value[TG_CUTOFF] != before) conductor_changed(panel);
                 } else if (k == 6) {
                     uint16_t *hz = &panel->dillo_sound.tone.cutoff_hz;
@@ -4253,11 +4551,13 @@ static void read_controls_once(struct panel *panel, unsigned head)
             else if (k == 3)
                 panel->pad_midi_channel = (uint8_t)bounded(panel->pad_midi_channel + delta, 0, MIDI_CHANNELS - 1);
             else if (k == 4)
-                panel->midi_tx = delta > 0;
+                panel->midi_tx = (uint8_t)bounded(panel->midi_tx + delta, 0, 3);   /* OFF, USB, TRS, BOTH */
             else if (k == 5)
                 select_profile(panel, bounded(panel->profile + delta, 0, TG_LAYOUT_PROFILES - 1));
             else if (k == 6)
                 panel->pedal_mode = (uint8_t)bounded(panel->pedal_mode + delta, PEDAL_OFF, PEDAL_HIGH);
+            else if (k == 7)
+                panel->clock_out = delta > 0;
         } else if (k == 7 && panel->page == PAGE_MANUAL && panel->fader_bank == 0) {
             sound->patch.sub_mode = (uint8_t)bounded(sound->patch.sub_mode + delta, 0, 2);
             panel->focus_control = 0;
@@ -4290,7 +4590,10 @@ static void read_controls_once(struct panel *panel, unsigned head)
             if (panel->page == PAGE_FX) p = k == 7 ? TG_GLIDE : fx_map[k];
             if (k == 4 && panel->page == PAGE_MANUAL && panel->fader_bank == 3) p = TG_VIBRATO;
             unsigned stride = (p == CTRL_TEMPO || control_switch(p) || control_five_positions(p)) ? 1u : p == CTRL_LEVEL ? 4u : 2u;
-            set_control(sound, p, (int)control_value(sound, p) + delta * (int)stride);
+            int speed = control_switch(p) || control_five_positions(p) ? delta :
+                        p == CTRL_TEMPO ? knob_fine(delta) : knob_speed(delta);
+            if (knob_speed_on && speed != delta) stride = 1; /* knob_speed sets the pace on its own */
+            set_control(sound, p, (int)control_value(sound, p) + speed * (int)stride);
             if (focus_allowed && (p != CTRL_TEMPO || sound->clock.source != TG_CLOCK_USB)) {
                 focus_control(panel, p, k, 0, 0, frames);
                 knob_focused = 1;
@@ -4311,8 +4614,8 @@ static void read_controls_once(struct panel *panel, unsigned head)
         for (unsigned i = 0; i < 4; i++) {
             unsigned p = panel->page == PAGE_FILTER_ENV ? CTRL_FILTER_ATTACK + i :
                                                           panel->fader_map[panel->fader_bank][i];
-            unsigned from = last_fader[i], to = faders[i], value = control_value(sound, p);
-            unsigned target = p == CTRL_TEMPO ? ((value - 30u) * 127u + 135u) / 270u : control_switch(p) ? value*127u : control_five_positions(p) ? (value*127u+2u)/4u : value;
+            unsigned from = last_fader[i], to = faders[i];
+            unsigned target = control_target127(sound, p);
             if (panel->save_mode) {
                 fader_caught = 0;
 #ifdef ELITE_DRUMS808
@@ -4342,7 +4645,7 @@ static void read_controls_once(struct panel *panel, unsigned head)
                 if ((from <= target && to >= target) || (from >= target && to <= target))
                     fader_caught |= 1u << i;
                 if ((fader_caught & (1u << i)) && to != target)
-                    set_control(sound, p, p == CTRL_TEMPO ? 30 + (int)(to * 270u / 127u) : control_switch(p) ? (int)(to>=64u) : control_five_positions(p) ? (int)((to*4u+63u)/127u) : (int)to);
+                    set_control(sound, p, control_from127(p, to));
             }
             unsigned anchor = focus_fader_position[i];
             if (to + 2u < anchor || anchor + 2u < to) {
@@ -4416,6 +4719,9 @@ static void read_controls_once(struct panel *panel, unsigned head)
             }
 #endif
             panel->pads_down &= ~(1u << pad);
+#ifdef ELITE_DRUMS808
+            if (panel->band_hold_pad == pad + 1u) panel->band_hold_pad = 0;
+#endif
             if (panel->audition_step && (panel->audition_step - 1u) % TG_PADS == pad)
                 panel->audition_step = 0;
 #ifdef ELITE_DRUMS808
@@ -4574,7 +4880,11 @@ static void read_controls_once(struct panel *panel, unsigned head)
             } else if (panel->conductor_seq_pending) {
                 /* SEQ + any pad of an instrument's group opens that instrument's editor. */
                 panel->conductor_seq_pending = (uint8_t)band_lane_editor(band_group_lane(pad));
-            } else band_pad(panel, pad, buttons & (1u << BTN_REC));
+            } else {
+                band_pad(panel, pad, buttons & (1u << BTN_REC));
+                panel->band_hold_pad = (uint8_t)(pad + 1u);
+                panel->band_hold_frame = fm1_in.frames;
+            }
         } else if (panel->page == PAGE_DRUMS) {
             if (panel->drums_voice_pick) {
                 if (pad < DRUM_SOUNDS) drum_pick_sound(panel, pad);
@@ -4715,6 +5025,46 @@ static void read_controls_once(struct panel *panel, unsigned head)
     if (seq_held && new_keys) panel->seq_exit_pending = 0;
     transpose_down = down;
     transpose_keys &= down;
+    {
+        /* PERFORM: FX held (alone), the lowest octave's keys hold effects instead of notes. A key keeps its
+         * effect until it is let go, even after FX. Letting FX go after using it returns to the page it left. */
+        static const uint8_t white_fx[12] = {TG_PF_R8 + 1, 0, TG_PF_R16 + 1, 0, TG_PF_R32 + 1, TG_PF_REV + 1, 0,
+                                             TG_PF_TAPE + 1, 0, TG_PF_LPF + 1, 0, TG_PF_HPF + 1};
+        static const uint8_t black_mute[12] = {0, 1, 0, 2, 0, 0, 3, 0, 4, 0, 0, 0};
+        unsigned fx_held = (buttons & (1u << BTN_FX)) && !seq_held && !globe_held && !panel->save_mode;
+        uint64_t captured = fx_held ? new_keys & UINT64_C(0xfff) : 0;
+        perform_owned = (perform_owned & down) | captured;
+        if (captured) {
+            perform_used = 1;
+            transpose_keys |= captured;
+            new_keys &= ~captured;
+            for (unsigned key = 0; key < 12; key++)
+                if ((captured & (UINT64_C(1) << key)) && white_fx[key] && white_fx[key] <= TG_PF_TAPE + 1)
+                    panel->perform_fx = white_fx[key]; /* the last pressed plays */
+        }
+        transpose_keys |= perform_owned;
+        unsigned fx = 0, filters = 0, mutes = 0;
+        for (unsigned key = 0; key < 12; key++) {
+            if (!(perform_owned & (UINT64_C(1) << key))) continue;
+            if (white_fx[key] == TG_PF_LPF + 1) filters |= 1u;
+            else if (white_fx[key] == TG_PF_HPF + 1) filters |= 2u;
+            else if (white_fx[key] && !fx) fx = white_fx[key];
+            if (black_mute[key]) mutes |= 1u << (black_mute[key] - 1u);
+        }
+        /* The last pressed buffer effect while it is held, else another still held. */
+        unsigned last_held = 0;
+        for (unsigned key = 0; key < 12; key++)
+            if ((perform_owned & (UINT64_C(1) << key)) && white_fx[key] == panel->perform_fx) last_held = 1;
+        panel->perform_fx = (uint8_t)(last_held ? panel->perform_fx : fx);
+        panel->perform_filters = (uint8_t)filters;
+        panel->perform_mutes = (uint8_t)mutes;
+        if (perform_fx_was_held && !(buttons & (1u << BTN_FX)) && perform_used) {
+            panel->page = perform_page_before;
+            perform_used = 0;
+        }
+        perform_fx_was_held = (buttons & (1u << BTN_FX)) != 0;
+        panel->perform_view = (uint8_t)(fx_held && (perform_used || (uint32_t)(frames - perform_fx_frame) > 30u));
+    }
     const uint64_t reset_key = UINT64_C(1) << (TG_KEYS - 1);
     const uint64_t scale_keys = ((UINT64_C(1) << SCALE_ROOTS) - 1u) << SCALE_FIRST_KEY;
     const uint64_t channel_keys = (UINT64_C(1) << MIDI_CHANNELS) - 1u;

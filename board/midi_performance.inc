@@ -11,6 +11,62 @@ static uint32_t midi_silence_seen;
 static uint32_t midi_strikes[4];
 /* At most one full phrase can be entered before the cursor disarms. */
 static uint8_t midi_step_notes[TG_STEPS], midi_step_count, midi_step_armed, midi_step_key;
+/* Learnable CCs from this batch, latest value per CC, for read_performance to apply (MIDI learn). */
+static uint8_t midi_cc_q[TG_LEARN_SLOTS][2], midi_cc_count;
+static tg_cc_pickup cc_pickup;
+static uint8_t cc_pickup_ready;
+/* The Band link's other end: Program Change n on the keys channel cues Band preset n + 1 for the next bar. */
+static uint8_t midi_pc_pending;
+
+static unsigned queue_program_change(uint32_t packet, unsigned channel)
+{
+    if ((packet & 0xffu) != 12u || ((packet >> 8) & 0xffu) != (0xc0u | channel)) return 0;
+    midi_pc_pending = (uint8_t)(((packet >> 16) & 0x7fu) + 1u);
+    return 1;
+}
+
+static unsigned queue_learnable_cc(uint32_t packet, unsigned channel)
+{
+    unsigned cin = packet & 0xffu, status = (packet >> 8) & 0xffu, cc = (packet >> 16) & 0xffu, value = packet >> 24;
+    if (cin != 11u || status != (0xb0u | channel) || value > 127u || !tg_cc_learnable(cc)) return 0;
+    for (unsigned i = 0; i < midi_cc_count; i++)
+        if (midi_cc_q[i][0] == cc) { midi_cc_q[i][1] = (uint8_t)value; return 1; }
+    if (midi_cc_count < TG_LEARN_SLOTS) {
+        midi_cc_q[midi_cc_count][0] = (uint8_t)cc;
+        midi_cc_q[midi_cc_count++][1] = (uint8_t)value;
+    }
+    return 1;
+}
+
+/* On ASSIGN a CC becomes the source and plays nothing; elsewhere a learned CC moves its control. */
+static void apply_midi_cc(struct panel *panel)
+{
+    if (!cc_pickup_ready) { tg_cc_pickup_reset(&cc_pickup); cc_pickup_ready = 1; }
+    tg_controls *sound = &panel->sound;
+    for (unsigned i = 0; i < midi_cc_count; i++) {
+        unsigned cc = midi_cc_q[i][0], value = midi_cc_q[i][1];
+        if (panel->page == PAGE_ASSIGN) {
+            unsigned to = panel->assign_source == MAP_KNOB ? panel->knob_map[panel->knob_bank][panel->assign_slot % 8u] + 1u :
+                          panel->assign_source == MAP_FADER ? panel->fader_map[panel->fader_bank][panel->assign_slot % 4u] + 1u :
+                          panel->assign_source == MAP_CC ? panel->cc_map.to[panel->assign_slot % TG_LEARN_SLOTS] : 0u;
+            int slot = tg_cc_learn(&panel->cc_map, cc, to);
+            panel->cc_full = slot < 0;
+            if (slot >= 0) {
+                panel->assign_source = MAP_CC;
+                panel->assign_slot = (uint8_t)slot;
+            }
+            continue;
+        }
+        int slot = tg_cc_find(&panel->cc_map, cc);
+        if (slot < 0 || !panel->cc_map.to[slot]) continue;
+        unsigned p = panel->cc_map.to[slot] - 1u;
+        if (p >= CTRL_COUNT || (p == CTRL_TEMPO && sound->clock.source == TG_CLOCK_USB)) continue;
+        if (tg_cc_pickup_take(&cc_pickup, (unsigned)slot, value, control_target127(sound, p),
+                              control_switch(p) || control_five_positions(p)))
+            set_control(sound, p, control_from127(p, value));
+    }
+    midi_cc_count = 0;
+}
 
 static void midi_drain(void)
 {
@@ -20,6 +76,8 @@ static void midi_drain(void)
         tg_clock_disconnect(&performance_clock);
         midi_reset_seen = usb.resets;
         mi_r = mi_w;
+        midi_cc_count = 0;
+        midi_pc_pending = 0;
         midi_in_overflow = 0;
         midi_step_count = midi_step_key = midi_gate_broke = 0;
         memset(midi_strikes, 0, sizeof midi_strikes);
@@ -35,7 +93,9 @@ static void midi_drain(void)
             uint8_t trigger = performance_midi.trigger, held = performance_midi.count;
             unsigned overlap = midi_step_key &&
                 (performance_midi.down[midi_step_key / 8u] & (1u << (midi_step_key % 8u)));
-            tg_midi_packet(&performance_midi, midi_in_q[index]);
+            if (!queue_learnable_cc(midi_in_q[index], performance_midi.channel) &&
+                !queue_program_change(midi_in_q[index], performance_midi.channel))
+                tg_midi_packet(&performance_midi, midi_in_q[index]);
             if (held && !performance_midi.count) midi_gate_broke = 1;
             /* Only accepted Note On changes trigger. Keep each pitch across the batch. */
             if (performance_midi.trigger != trigger) {
@@ -82,6 +142,13 @@ static void read_performance(struct panel *panel, unsigned head)
     }
 #endif
     read_controls(panel, head);
+    apply_midi_cc(panel);
+    if (midi_pc_pending) {
+#ifdef ELITE_BAND_PRESETS
+        (void)conductor_cue_band_preset(panel, midi_pc_pending - 1u); /* lands on the bar like a pad */
+#endif
+        midi_pc_pending = 0;
+    }
     if (panel->midi_step_entry & MIDI_STEP_ENTRY) {
         unsigned tie = panel->midi_step_entry & MIDI_STEP_TIE ? TG_TIE : 0;
         for (unsigned i = 0; i < midi_step_count && panel->record; i++) {

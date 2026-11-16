@@ -1,0 +1,8 @@
+TR-727 recordings from Compás 1.1 under GPL-3.0-only.
+Hanan Cumbia
+Oficina de Sonido
+https://hanancumbia.oficinadesonido.org/
+hanan26Taller, 2026-07-21
+CC BY-SA 3.0
+https://creativecommons.org/licenses/by-sa/3.0/
+Original unsigned PCM extracted from the Compás Kumbia Kit WAV files. Bytes unchanged.

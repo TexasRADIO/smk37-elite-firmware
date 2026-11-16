@@ -59,7 +59,7 @@ static void strip_cells(const struct panel *panel, struct strip_cell cell[8])
     }
     if (page == PAGE_DILLO) {
         dillo_step step = panel->dillo_pattern.steps[panel->dillo_cursor];
-        cell[0] = strip_set("LVL", sound->master, 0, 127);
+        cell[0] = strip_set("MAIN", sound->master, 0, 127);
         if (panel->dillo_record >= DILLO_REC_PITCH) {
             if (panel->dillo_record == DILLO_REC_TIME) {
                 unsigned gate = panel->dillo_time_edit ?
@@ -103,7 +103,7 @@ static void strip_cells(const struct panel *panel, struct strip_cell cell[8])
                         sound->patch.value[k == MIX_DELAY ? TG_DELAY : TG_REVERB];
             cell[k] = strip_set(mix_label[k], (int)value, 0, 127);
         }
-        cell[7] = strip_set("MSTR", sound->master, 0, 127);
+        cell[7] = strip_set("MAIN", sound->master, 0, 127);
         return;
     }
 #ifdef ELITE_SYNTH_PRESETS
@@ -113,7 +113,23 @@ static void strip_cells(const struct panel *panel, struct strip_cell cell[8])
     }
 #endif
     if (page == PAGE_DRUM_PRESETS) {
+#ifdef ELITE_BAND_PRESETS
+        if (panel->rhythm_source == RHYTHM_BAND) {
+            unsigned of, place = band_title_place(panel->drum_preset_bank, &of);
+            cell[0] = strip_set("SONG", (int)place, 1, (int)of); /* K1 runs down the titles */
+        } else
+#endif
         cell[0] = strip_set("SPIN", (int)rhythm_selected(panel), 1, (int)rhythm_total(panel)); /* K1 spins the jukebox */
+#ifdef ELITE_PERCUSSION_727
+        if (panel->rhythm_source == RHYTHM_LAYER) {
+            for (unsigned k = 0; k < 8; k++)
+                cell[k] = layer_group_name[k] ? strip_set(layer_group_name[k], panel->layer_mix[k], 0, 127) :
+                                                (struct strip_cell){0, 0};
+            return;
+        }
+        if (panel->rhythm_source == RHYTHM_BAND && panel->layer_available)
+            cell[3] = strip_set("727", panel->band_layer * 127u / LAYER_RHYTHM_COUNT, 0, 127);
+#endif
         return;
     }
     if (page == PAGE_SCENES || page == PAGE_KITS || page == PAGE_INSTRUMENTS) return;
@@ -154,9 +170,10 @@ static void strip_cells(const struct panel *panel, struct strip_cell cell[8])
         cell[1] = strip_set("SCL", panel->scale_type, 0, sizeof scale_intervals / sizeof scale_intervals[0] - 1);
         cell[2] = strip_set("KCH", panel->midi_channel, 0, MIDI_CHANNELS - 1);
         cell[3] = strip_set("PCH", panel->pad_midi_channel, 0, MIDI_CHANNELS - 1);
-        cell[4] = strip_set("USB", panel->midi_tx, 0, 1);
+        cell[4] = strip_set("OUT", panel->midi_tx, 0, 3);
         cell[5] = strip_set("PRE", panel->profile, 0, TG_LAYOUT_PROFILES - 1);
         cell[6] = strip_set("PED", panel->pedal_mode, PEDAL_OFF, PEDAL_HIGH);
+        cell[7] = strip_set("CLK", panel->clock_out, 0, 1);
         return;
     }
     if (page == PAGE_PATCH) {
@@ -206,10 +223,10 @@ static unsigned strip_hints(const struct panel *panel, unsigned held, struct str
     if (page == PAGE_SYNTH_PRESETS) {
 #ifdef ELITE_ACID_DUETS
         if (synth_preset_duets(panel)) {
-            if (held == 9) { HINT("PAD 1-8", "KEEP SOUND"); return n; } /* CHORD */
-            HINT("PAD 1-8", "DUET");
-            HINT("PAD 9-16", panel->synth_preset_dillo ? "BASS" : "LEAD");
-            HINT("PARA", "SOURCE");
+            if (held == 9) { HINT("PAD", "KEEP SOUND"); return n; } /* CHORD */
+            HINT("PAD", "DUET");
+            HINT("< >", "PAGE");
+            HINT("CHORD", "KEEP SOUND");
             return n;
         }
 #endif
@@ -259,8 +276,7 @@ static unsigned strip_hints(const struct panel *panel, unsigned held, struct str
     case PAGE_GLOBAL: HINT("GLOBE", "BACK"); HINT("BT", "HOME"); break;
     case PAGE_ASSIGN: HINT("< >", "DEST"); HINT("REC", "SAVE"); HINT("BT", "DONE"); break;
     case PAGE_PATCH: HINT("PAD", "LOAD"); HINT("< >", "PAGE"); HINT("REC", "COPY"); break;
-    case PAGE_DILLO_SOUND: HINT(panel->dillo_sound_page ? "<" : ">", panel->dillo_sound_page ? "TONE" : "MOD");
-        HINT("PARA", "BANK"); HINT("PATCH", panel->dillo_sound_home ? "HOME" : "STEPS"); break;
+    case PAGE_DILLO_SOUND: HINT("< >", "SOUNDS"); HINT("PARA", panel->dillo_sound_page ? "TONE" : "MOD"); HINT("PATCH", panel->dillo_sound_home ? "HOME" : "STEPS"); break;
     case PAGE_DILLO:
         if (panel->dillo_record == DILLO_REC_PITCH) { HINT("REC", "TIME"); HINT("PARA", "CANCEL"); HINT("<", "UNDO"); }
         else if (panel->dillo_record == DILLO_REC_TIME) {
@@ -276,8 +292,21 @@ static unsigned strip_hints(const struct panel *panel, unsigned held, struct str
     case PAGE_MIX: HINT("PAD", "LANE"); HINT("PARA", "MUTE"); HINT("FX", "BACK"); break;
     case PAGE_SCENES: HINT("PAD", "CUE"); HINT("REC", "SAVE"); HINT("BT", "BACK"); break;
     case PAGE_KITS: HINT("PAD", "RECALL"); HINT("REC", "SAVE"); HINT("BT", "BACK"); break;
-    case PAGE_INSTRUMENTS: HINT(ELITE_DRUM_PARTS > 1 ? "PAD 1-5" : "PAD 1-4", "PLAY"); HINT("BT", "BACK"); break;
-    case PAGE_DRUM_PRESETS: HINT("PAD", "LOAD"); HINT("< >", "BANK"); HINT("PATCH", "STEPS"); break;
+    case PAGE_INSTRUMENTS:
+#ifdef ELITE_PERCUSSION_727
+        HINT(ELITE_DRUM_PARTS > 1 || panel->layer_available ? "PAD 1-5" : "PAD 1-4", "PLAY");
+#else
+        HINT(ELITE_DRUM_PARTS > 1 ? "PAD 1-5" : "PAD 1-4", "PLAY");
+#endif
+        HINT("BT", "BACK"); break;
+    case PAGE_DRUM_PRESETS:
+#ifdef ELITE_BAND_PRESETS
+        if (panel->rhythm_source == RHYTHM_BAND) {
+            /* The arrows name where they go next: Songs, Machines, Eras. */
+            HINT("PAD", "PLAY"); HINT("< >", band_kind_name[(band_page_kind(panel->drum_preset_bank) + 1u) % 3u]); break;
+        }
+#endif
+        HINT("PAD", "LOAD"); HINT("< >", "BANK"); HINT("PATCH", "STEPS"); break;
     }
 #undef HINT
     return n;
@@ -322,22 +351,23 @@ static void view_footer(uint16_t *pixels, const struct panel *panel)
     unsigned held = strip_held(panel->held_buttons);
 #ifdef ELITE_DRUMS808
     if (library_active(panel) && held == STRIP_HELD_NONE) {
-        /* LIBRARY: the shelves are the hint row. PATCH steps right (then home), BT goes back. */
+        /* LOAD: the list you're on, a dot for each list, PATCH naming the next one, BT back. */
         uint8_t shelf[LIBRARY_SHELVES_MAX];
-        unsigned n = library_shelves(panel, shelf);
-        int x = view_keycap(pixels, 5, "PATCH", "", liv) - 4, gap = 4, need = x;
-        for (unsigned i = 0; i < n; i++) need += view_small_width(library_shelf_name[shelf[i]]) + 8;
-        if (need + 8 > VIEW_W) gap = 2; /* four shelves: close up so every name fits */
-        for (unsigned i = 0; i < n; i++) {
-            const char *name = library_shelf_name[shelf[i]];
-            if (shelf[i] == panel->library_shelf) {
-                int w = view_small_width(name) + 2 * gap;
-                view_rect(pixels, x, 223, w, 14, liv->accent);
-                view_small(pixels, x + gap, 227, name, liv->ground);
-                x += w + gap;
-            } else x = view_small(pixels, x + gap, 227, name, liv->ink) + gap;
-        }
-        if (x + view_small_width("BT BACK") + 18 <= VIEW_W) view_keycap(pixels, x + 4, "BT", "BACK", liv);
+        unsigned n = library_shelves(panel, shelf), at = 0;
+        while (at < n && shelf[at] != panel->library_shelf) at++;
+        const char *now = at < n ? library_shelf_name[shelf[at]] : "LOAD";
+        /* What a pad here changes: the whole band, or one part only. */
+        unsigned pick = library_pick(panel), cur = at < n ? shelf[at] : SHELF_COUNT;
+        const char *scope = cur == SHELF_SONGS || cur == SHELF_SETUPS ? "ALL PARTS" :
+                            cur == SHELF_DUETS || cur == SHELF_DILLO_DUETS ? "101+303" :
+                            cur == SHELF_LAYER ? "727 ONLY" :
+                            cur == SHELF_KITS || cur == SHELF_RHYTHMS ? "808 ONLY" :
+                            pick == PICK_DILLO || (pick == PICK_BAND && panel->conductor_dillo_keys) ||
+                            cur == SHELF_DILLO_SOUNDS || cur == SHELF_DILLO_PATTERNS ? "303 ONLY" :
+                            "101 ONLY";
+        int x = view_keycap(pixels, 4, now, scope, liv);
+        x = view_keycap(pixels, x, "PATCH", library_shelf_name[shelf[at + 1u < n ? at + 1u : 0]], liv);
+        view_keycap(pixels, x, "BT", "BACK", liv);
         return;
     }
 #endif
@@ -349,9 +379,9 @@ static void view_footer(uint16_t *pixels, const struct panel *panel)
         x = view_keycap(pixels, x, held_name[held], "+", liv);
     }
     for (unsigned i = 0; i < n; i++) {
-        int need = view_small_width(hint[i].key) + view_small_width(hint[i].action) + 13;
+        int need = view_picnic_width(hint[i].key, &picnic_M) + view_picnic_width(hint[i].action, &picnic_M) + 18;
         if (x + need > VIEW_W) break;
         x = hint[i].key[0] ? view_keycap(pixels, x, hint[i].key, hint[i].action, liv) :
-                             view_small(pixels, x, 227, hint[i].action, liv->ink) + 6;
+                             view_picnic(pixels, x, 221, hint[i].action, &picnic_M, liv->ink) + 8;
     }
 }

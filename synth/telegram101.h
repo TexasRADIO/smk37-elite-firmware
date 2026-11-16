@@ -162,6 +162,9 @@ typedef struct {
     uint8_t phrase_launch, arp_odd, filter_stage, repeat_odd, phrase_gate, restart_pitch;
     uint8_t step_odd;
     uint8_t phrase_with_arp, internal_live_arp; /* Conductor keeps the phrase clock running under the arp. */
+    /* Nonzero: the output level to use in place of controls.master (0-127). In the Band, the master
+     * belongs to the whole mix, so Telegram's own engine runs at a fixed level. */
+    uint8_t fixed_master;
 } tg_voice;
 
 unsigned tg_pattern_length(const tg_controls *);

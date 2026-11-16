@@ -15,23 +15,11 @@ from usb_clock import stage as stage_clock
 
 ROOT = Path(__file__).resolve().parents[1]
 SMK_MODELS = {
-    "pro": {
-        "identity": "SMK-37 Pro",
-        "product": "FM-1_92370001",
-        "stub_lock": "stub_smk37.lock",
-    },
-    "elite": {
-        "identity": "SMK-37 Elite",
-        "product": "FM-1_92370002",
-        "stub_lock": "stub_smk37-elite.lock",
-    },
-    "mke": {
-        "identity": "MKE-P37",
-        "product": "FM-1_92370003",
-        "stub_lock": "stub_smk37-mke.lock",
-    },
+    "pro": {"identity": "SMK-37 Pro", "stub_lock": "stub_smk37.lock"},
+    "elite": {"identity": "SMK-37 Elite", "stub_lock": "stub_smk37-elite.lock"},
+    "mke": {"identity": "MKE-P37", "stub_lock": "stub_smk37-mke.lock"},
 }
-UNITS = ["board/main.c", "pi32/runtime.c", "synth/telegram101.c", "synth/presets.c", "synth/fx101.c", "synth/store101.c", "synth/catalog101.c", "synth/midi101.c", "synth/clock101.c"]
+UNITS = ["board/main.c", "pi32/runtime.c", "synth/telegram101.c", "synth/presets.c", "synth/fx101.c", "synth/store101.c", "synth/catalog101.c", "synth/midi101.c", "synth/clock101.c", "synth/clockout101.c", "synth/miditrs101.c", "synth/scope101.c", "synth/perform101.c"]
 DRUM_RENDER_HOT = ("bb_drum808_render_q23", "bd_tick", "sd_tick", "tom_tick", "cl_tick", "rs_tick", "cp_tick",
                    "hat_tick", "cy_tick", "shape", "shaper", "bd_reset", "env_arm")
 
@@ -105,17 +93,25 @@ def font_header(path, dest):
     dest.write_text("\n".join([*lines, "};", ""]))
 
 
+# BB–37's own firmware number: the stock model name (M-VAVE's updater and the installers still know the
+# keyboard), then 3737 and the build, so installers and the Firmware Hub can tell BB–37 from other firmwares.
+# Build 801 is "SMK-37 Elite_3737801": product names are at most 20 characters, so the build stays three digits.
+FIRMWARE_ID_PREFIX = 3737
+
+
+def firmware_version(build_number):
+    assert 0 < build_number < 1000, "three-digit builds keep the name within 20 characters"
+    return FIRMWARE_ID_PREFIX * 1000 + build_number
+
+
 def build(args):
     model = SMK_MODELS[args.model]
-    # The model name selects the correct board stub and stock return route.
-    # The package/application identity is a separate, Hub-visible FM-1_
-    # number.  It must be unique without replacing SMK_MODEL in the loader.
-    product = model["product"]
+    product = f"{model['identity']}_{firmware_version(args.build_number)}"
     out = args.out.resolve()
     out.mkdir(exist_ok=False)
     imported = None
     if (args.studio_bank or args.fm1_bank) and not args.imported_bank:
-        raise ValueError('Studio and standalone FM-1 drafts require the optional TAL base bank')
+        raise ValueError('Studio and standalone FM-1 drafts require the private TAL base bank')
     if args.imported_bank:
         spec = importlib.util.spec_from_file_location("tal_bank", ROOT / "tools/tal_bank.py")
         bank_tool = importlib.util.module_from_spec(spec)
@@ -171,6 +167,7 @@ def build(args):
             raise ValueError(f"DSP source changed: {file}")
     shutil.copytree(ROOT / "board/vendor", staged)
     font_header(staged / "font/ter-u16n.bdf", out / "font.inc")
+    os.environ["JIELI_DOCKER"] = "0"
     os.environ["JIELI_TOOLCHAIN"] = str(tc)
     os.environ.pop("FM1_STUB_LOCK", None)
     spec = importlib.util.spec_from_file_location("retained_builder", staged / "tools/build.py")
@@ -387,7 +384,7 @@ def build(args):
     package = out / "elite-review.fwsc"
     package.write_bytes(pack.ufw(pack.flash_image(app, pack.KEY), ota, product))
     report = {
-        "product": product, "model": args.model, "compiler": version, "imported_bank": imported,
+        "product": product, "firmware_id": firmware_version(args.build_number), "model": args.model, "compiler": version, "imported_bank": imported,
         "synth_presets": synth_presets, "band_presets": band_presets,
         "dillo_preview": args.dillo, "drums808_preview": args.drums, "render_profile": args.render_profile,
         "drum_render_in_ram": args.drum_render_in_ram,
@@ -400,8 +397,8 @@ def build(args):
         "toolchain_sha256": {p.name: sha(p) for p in (cc, ld, objdump, objcopy)},
         "source_sha256": {path: sha(ROOT / path) for path in
                           [*units, *layer_headers, "board/build.py", "board/BOARD-PINS.json", "synth/telegram101.h", "synth/filter101.inc", "synth/fx101.h",
-                           "synth/store101.h", "synth/catalog101.h", "synth/midi101.h", "synth/clock101.h", "board/usb_clock.py", "board/midi_performance.inc", "board/midi_output.inc", "tools/tal_bank.py", "board/library_region.h", "board/library_storage.inc", "board/library_audio.inc", "board/ota_lifecycle.inc", "board/ota_safe_stage.inc", "board/ota_stage.py", "board/ota_trace.h",
-                           "board/panel101.inc", "board/pad_feedback.inc", "board/dillo_pattern_sounds.inc", "board/instrument_view.inc", "board/view_chrome.inc", "board/picnic_aa.inc", "board/view_tel.inc", "board/view_dillo.inc", "board/view_band.inc",
+                           "synth/store101.h", "synth/catalog101.h", "synth/midi101.h", "synth/clock101.h", "synth/clockout101.h", "synth/miditrs101.h", "synth/scope101.h", "synth/learn101.h", "synth/perform101.h", "synth/sideman101.h", "board/smk_uart_tx.h", "board/usb_clock.py", "board/midi_performance.inc", "board/midi_output.inc", "tools/tal_bank.py", "board/library_region.h", "board/library_storage.inc", "board/library_audio.inc", "board/ota_lifecycle.inc", "board/ota_safe_stage.inc", "board/ota_stage.py", "board/ota_trace.h",
+                           "board/panel101.inc", "board/pad_feedback.inc", "board/dillo_pattern_sounds.inc", "board/instrument_view.inc", "board/view_chrome.inc", "board/picnic_aa.inc", "board/view_tel.inc", "board/sh101_charts.inc", "board/view_dillo.inc", "board/view_band.inc",
                            "board/view_808.inc", "board/drum_presets.inc", "board/view_footer.inc", "board/view_focus.inc", "board/picnic_title.inc", "board/PICNIC-PROVENANCE.json", "SOURCE-PINS.json", "tools/model-headers/string.h",
                            "board/usb_diag.h", "board/usb_diag.inc", "board/usb_reconnect.inc", "board/usb_tx.inc", "Makefile"]},
         "regions": {
@@ -427,9 +424,9 @@ if __name__ == "__main__":
     parser.add_argument("--build-number", type=int, choices=range(475, 1000), default=512, metavar="475–999")
     parser.add_argument("--model", choices=sorted(SMK_MODELS), default="elite",
                         help="SMK-37 updater identity (default: elite)")
-    parser.add_argument("--imported-bank", type=Path, help="optional local calibrated audition-bank JSON")
-    parser.add_argument("--synth-presets", type=Path, help="generated synth phrase bank directory")
-    parser.add_argument("--band-presets", type=Path, help="generated Band preset directory")
+    parser.add_argument("--imported-bank", type=Path, help="optional private calibrated audition-bank JSON")
+    parser.add_argument("--synth-presets", type=Path, help="private synth phrase bank from tools/import_synth_patterns.cjs")
+    parser.add_argument("--band-presets", type=Path, help="private Band presets from tools/import_band_presets.py")
     parser.add_argument("--studio-bank", type=Path, help="optional Studio audition-draft JSON")
     parser.add_argument("--studio-audit", type=Path, help="measurements for the exact Studio draft JSON")
     parser.add_argument("--dillo", action="store_true", help="include the two-voice integration preview")
@@ -438,7 +435,7 @@ if __name__ == "__main__":
     parser.add_argument("--single-808", action="store_true",
                         help="render only 808 A and keep both parts in saved setups")
     parser.add_argument("--percussion-plan", type=Path,
-                        help="optional local 727 flash plan directory")
+                        help="private 727 flash plan directory from tools/plan_727_flash.py")
     parser.add_argument("--render-profile", action="store_true",
                         help="capture per-lane ticks on the first audio deadline fault")
     parser.add_argument("--drum-render-in-ram", action="store_true",

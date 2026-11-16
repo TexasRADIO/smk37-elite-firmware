@@ -384,7 +384,8 @@ static void view_dillo_sound(uint16_t *pixels, const struct panel *panel)
     jukebox_big(pixels, 8, 19, 160, name, CHROME_303_INK);
     if (dillo_sound_edited(panel)) view_picnic(pixels, 170, 22, "*", &picnic_M, CHROME_303_RED);
     view_tag_left(pixels, VIEW_W - 8, 22, mod ? "MOD" : "TONE", CHROME_303_INK, CHROME_303);
-    char bank_label[6];
+    /* The page of sounds by name, and where it sits: the arrows step through all of them. */
+    char bank_label[6], collection[12];
     unsigned bank_now = panel->dillo_sound_bank + 1u, bank_all = dillo_sound_banks(), at = 0;
     if (bank_now > 9u) bank_label[at++] = (char)('0' + bank_now / 10u);
     bank_label[at++] = (char)('0' + bank_now % 10u);
@@ -392,7 +393,21 @@ static void view_dillo_sound(uint16_t *pixels, const struct panel *panel)
     if (bank_all > 9u) bank_label[at++] = (char)('0' + bank_all / 10u);
     bank_label[at++] = (char)('0' + bank_all % 10u);
     bank_label[at] = 0;
-    view_small(pixels, 202, 63, bank_label, DILLO_DIM);
+    static const char *const collections[4] = {"FACTORY", "EXPANSION", "CLASSIC 303", "DEVILFISH"};
+    unsigned bank = panel->dillo_sound_bank;
+    if (bank < 4u) {
+        unsigned n = 0;
+        for (const char *c = collections[bank]; *c; c++) collection[n++] = *c;
+        collection[n] = 0;
+    } else {
+        unsigned n = 0, k = bank - 3u;
+        for (const char *c = "STUDIO "; *c; c++) collection[n++] = *c;
+        if (k > 9u) collection[n++] = (char)('0' + k / 10u);
+        collection[n++] = (char)('0' + k % 10u);
+        collection[n] = 0;
+    }
+    view_picnic(pixels, 8, 45, collection, &picnic_S, CHROME_303_RED);
+    view_picnic(pixels, VIEW_W - 8 - view_picnic_width(bank_label, &picnic_S), 45, bank_label, &picnic_S, DILLO_DIM);
     unsigned base = panel->dillo_sound_bank * DILLO_SOUND_PAGE_SLOTS;
     for (unsigned i = 0; i < DILLO_SOUND_PAGE_SLOTS && base + i < dillo_sound_total(); i++) {
         unsigned x = 8 + i * 16;
@@ -478,9 +493,9 @@ static void view_dillo_sound(uint16_t *pixels, const struct panel *panel)
         panel->dillo_sound_status == KIT_EMPTY ? "EMPTY SOUND SLOT" :
         panel->dillo_sound_status == KIT_CAPTURED && panel->conductor_dirty ? "CAPTURED  REC SAVE SOUNDS" :
         panel->library_status == LIB_SAVED && !panel->conductor_dirty ? "SOUNDS SAVED" :
-        panel->dillo_sound_bank > 3u ? "STUDIO SOUNDS  PARA NEXT PAGE" :
-        panel->dillo_sound_bank == 3u ? "DEVILFISH  PARA NEXT PAGE" :
-        panel->dillo_sound_bank == 2u ? "CLASSIC 303  PARA NEXT PAGE" :
+        panel->dillo_sound_bank > 3u ? "BAND SOUNDS  < > MORE" :
+        panel->dillo_sound_bank == 3u ? "DEVILFISH EXTREMES  < > MORE" :
+        panel->dillo_sound_bank == 2u ? "CLASSIC 303S  < > MORE" :
         panel->dillo_sound_bank ? "BASS 1-4 ACID 5-8 LEAD 9-12" : "REC+PAD 9-12 CAPTURE";
     view_small(pixels, 8, 175, status, DILLO_DIM);
 

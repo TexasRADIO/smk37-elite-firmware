@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package calibrated local audition drafts for the optional Elite library.
+"""Package calibrated private audition drafts for the optional Elite library.
 
 No third-party patch data is copied into tracked sources. The generated manifest
 retains original names, source hashes, adaptations and measured limitations.

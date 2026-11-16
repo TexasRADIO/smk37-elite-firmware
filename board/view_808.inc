@@ -241,6 +241,45 @@ static void view_drum_presets(uint16_t *pixels, const struct panel *panel, unsig
         return;
     }
 
+#ifdef ELITE_BAND_PRESETS
+    if (band && panel->rhythm_info == JUKEBOX_LIST) {
+        /* LOAD > SONGS: the collection and where you are in it, then three titles (the lit one big),
+         * then the part under the pads' cursor and its three lanes. K1 titles, pads parts, arrows
+         * collections. */
+        unsigned page = panel->drum_preset_bank, of, place = band_title_place(page, &of);
+        char count[12], title[TG_NAME_BYTES + 4];
+        unsigned at = 0;
+        char digits[6];
+        jukebox_number(digits, place);
+        for (const char *c = digits; *c; c++) count[at++] = *c;
+        count[at++] = '/';
+        jukebox_number(digits, of);
+        for (const char *c = digits; *c; c++) count[at++] = *c;
+        count[at] = 0;
+        view_picnic(pixels, 8, 21, band_kind_name[band_page_kind(page)], &picnic_S, accent);
+        view_picnic(pixels, VIEW_W - 8 - view_picnic_width(count, &picnic_S), 21, count, &picnic_S, DIM);
+        for (int d = -1; d <= 1; d++) {
+            int p2 = (int)page + d;
+            if (p2 < 0 || p2 >= (int)band_pages()) continue;
+            const char *name = band_title((unsigned)p2, title);
+            if (!d) {
+                uint16_t lit = CHROME_CREAM;
+                for (unsigned pad = 0; pad < TG_PADS; pad++)
+                    if (pad_hit_glow(panel, pad)) lit = picnic_mix(lit, CHROME_808_ORANGE, pad_hit_glow(panel, pad) * 2u);
+                view_rect(pixels, 0, 58, VIEW_W, 40, lit);
+                jukebox_big(pixels, 8, 61, VIEW_W - 16, name, CHROME_BAND);
+            } else {
+                const picnic_face *face = view_picnic_width(name, &picnic_M) <= VIEW_W - 16 ? &picnic_M : &picnic_S;
+                view_picnic(pixels, 8, d < 0 ? 38 : 102, name, face, DIM);
+            }
+        }
+        char caps[32];
+        const char *part = jukebox_caps(rhythm_name(panel, index), caps);
+        view_picnic(pixels, 8, 122, part, view_picnic_width(part, &picnic_M) <= VIEW_W - 16 ? &picnic_M : &picnic_S, ink);
+        jukebox_lanes(pixels, panel, index, 144, band);
+        return;
+    }
+#endif
     if (panel->rhythm_info == JUKEBOX_LIST) {
         /* Three titles: the one before, the lit one, the one after. */
         for (int d = -1; d <= 1; d++) {
@@ -266,6 +305,12 @@ static void view_drum_presets(uint16_t *pixels, const struct panel *panel, unsig
     /* A card leads with the big name. */
     const char *name = rhythm_name(panel, index);
     jukebox_big(pixels, 8, 22, VIEW_W - 16, name, ink);
+#ifdef ELITE_PERCUSSION_727
+    if (panel->rhythm_source == RHYTHM_LAYER && panel->layer_combo && panel->band_layer == index + 1u) {
+        int x = view_small(pixels, 8, 60, "+ ", CORAL); /* combined with a second rhythm */
+        view_small(pixels, x, 60, layer_rhythm_names[panel->layer_combo - 1u], CORAL);
+    }
+#endif
 
     if (panel->rhythm_info == JUKEBOX_ABOUT) {
         const char *line[2] = {0, 0};
@@ -367,10 +412,20 @@ static void view_instruments(uint16_t *pixels, const struct panel *panel)
     (void)role;
     view_rect(pixels, 0, 18, VIEW_W, 166, CHROME_BAND);
     unsigned now = instrument_of_page(panel->instruments_return, panel);
-    const int row = PICK_COUNT <= 4 ? 40 : 32;
-    const picnic_face *face = PICK_COUNT <= 4 ? &picnic_L : &picnic_M;
-    for (unsigned i = 0; i < PICK_COUNT; i++) {
+    unsigned rows = PICK_COUNT;
+#if ELITE_DRUM_PARTS == 1 && defined(ELITE_PERCUSSION_727)
+    if (panel->layer_available) rows++; /* pad 5: the 727 layer */
+#endif
+    const int row = rows <= 4 ? 40 : 32;
+    const picnic_face *face = rows <= 4 ? &picnic_L : &picnic_M;
+    for (unsigned i = 0; i < rows; i++) {
         int y = 22 + (int)i * row;
+        if (i >= PICK_COUNT) {
+            view_rect(pixels, 8, y + 2, 32, row - 6, CORAL);
+            view_picnic(pixels, 24 - view_picnic_width("5", &picnic_M) / 2, y + (row - 6) / 2 - 7, "5", &picnic_M, CHROME_BAND);
+            view_picnic(pixels, 48, y + 6, "727 LAYER", face, CHROME_CREAM);
+            continue;
+        }
         uint16_t box = lane[i];
         if (pad_hit_glow(panel, i)) box = picnic_mix(box, CHROME_CREAM, pad_hit_glow(panel, i) * 3u);
         view_rect(pixels, 8, y + 2, 32, row - 6, box);

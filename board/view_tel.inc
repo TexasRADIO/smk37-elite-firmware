@@ -359,9 +359,71 @@ static void view_tel_keyboard(uint16_t *pixels, const struct panel *panel, unsig
 
 /* Telegram home: the sound's name big, the note being played big, one envelope picture and
  * the keybed. Struck pads (when they play sounds) flash the name. */
-static void view_tel_play_stage(uint16_t *pixels, const struct panel *panel, unsigned note)
+/* PERFORM's map while FX is held: the lowest octave as it plays now. White keys hold the effects (blue
+ * while held; dim when a slice is too long for the tempo), black keys mute a part (coral while muted). */
+static void view_perform_map(uint16_t *pixels, const struct panel *panel)
+{
+    static const char *const white_label[7] = {"1/8", "1/16", "1/32", "REV", "TAPE", "LPF", "HPF"};
+    static const uint8_t white_fx[7] = {TG_PF_R8, TG_PF_R16, TG_PF_R32, TG_PF_REV, TG_PF_TAPE, TG_PF_LPF, TG_PF_HPF};
+    static const uint8_t black_after[4] = {0, 1, 3, 4}; /* C#, D#, F#, G#: after these white keys */
+    static const char *const black_label[4] = {"TEL", "DIL", "808A", "808B"};
+    view_rect(pixels, 0, 18, VIEW_W, 166, TEL_STAGE);
+    view_picnic(pixels, 8, 21, "PERFORM", &picnic_M, INK);
+    view_small(pixels, VIEW_W - 8 - view_small_width("HOLD FX + KEYS"), 30, "HOLD FX + KEYS", DIM);
+    const int x0 = 12, w = 30, top = 86, h = 82;
+    view_small(pixels, x0 + 2, top - 40, "REPEAT", DIM);
+    view_rect(pixels, x0, top - 31, 3 * w - 2, 1, DIM);
+    for (unsigned k = 0; k < 7; k++) {
+        unsigned fx = white_fx[k];
+        unsigned held = fx == TG_PF_LPF ? panel->perform_filters & 1u : fx == TG_PF_HPF ? panel->perform_filters & 2u :
+                        panel->perform_fx == fx + 1u;
+        unsigned fits = fx >= TG_PF_TAPE || tg_perform_slice(fx, panel->sound.tempo);
+        uint16_t key = held ? CHROME_BLUE : fits ? INK : picnic_mix(INK, TEL_STAGE, 10u);
+        view_rect(pixels, x0 + w * (int)k, top, w - 2, h, key);
+        const char *label = white_label[k];
+        view_small(pixels, x0 + w * (int)k + (w - 2 - view_small_width(label)) / 2, top + h - 14, label,
+                   held ? INK : TEL_STAGE);
+    }
+    for (unsigned b = 0; b < 4; b++) {
+        int x = x0 + w * (black_after[b] + 1) - 11;
+        unsigned muted = panel->perform_mutes & (1u << b);
+        view_rect(pixels, x, top, 18, 52, muted ? CORAL : TEL_PLOT);
+        const char *label = black_label[b];
+        view_small(pixels, x + 9 - view_small_width(label) / 2, top - (b & 1u ? 24 : 12), label, muted ? CORAL : DIM);
+    }
+    const char *status = panel->perform_mutes ? "BLACK KEYS: MUTED WHILE HELD" :
+                         panel->perform_fx || panel->perform_filters ? "LET GO TO END IT" : "WHITE KEYS: EFFECTS";
+    view_status_line(pixels, 172, status, DIM);
+}
+
+enum { VIEW_TEL_PLOT_Y = 94, VIEW_TEL_PLOT_H = 48 };
+
+/* One picture: the sound itself while it plays (three periods of the note, steady on a rising edge),
+ * else how it moves (the envelope; the gated VCA as a box). The board defines TG_SCOPE_LIVE; host
+ * renders draw the envelope. */
+static void view_tel_play_plot(uint16_t *pixels, const struct panel *panel, unsigned note)
 {
     const tg_patch *patch = &panel->sound.patch;
+    view_rect(pixels, 8, VIEW_TEL_PLOT_Y, 224, VIEW_TEL_PLOT_H, TEL_PLOT);
+#ifdef TG_SCOPE_LIVE
+    int8_t wave[217];
+    if (tg_scope_trace(TG_SCOPE_LIVE, tg_scope_period16(note), wave, 217, 20)) {
+        int mid = VIEW_TEL_PLOT_Y + VIEW_TEL_PLOT_H / 2 - 1;
+        view_rect(pixels, 12, mid, 216, 1, picnic_mix(TEL_PLOT, DIM, 6u));
+        for (int c = 0; c < 216; c++) view_slope(pixels, 12 + c, mid - wave[c], 1, mid - wave[c + 1], CHROME_BLUE);
+        return;
+    }
+#endif
+    (void)note;
+    if (patch->amp_gate) {
+        view_slope(pixels, 12, 138, 8, 100, CHROME_BLUE);
+        view_slope(pixels, 20, 100, 200, 100, CHROME_BLUE);
+        view_slope(pixels, 220, 100, 8, 138, CHROME_BLUE);
+    } else view_tel_envelope(pixels, patch, 0, 12, 98, 216, 40);
+}
+
+static void view_tel_play_stage(uint16_t *pixels, const struct panel *panel, unsigned note)
+{
     const char *name = panel_sound_name(panel);
     unsigned glow = 0;
     for (unsigned pad = 0; pad < TG_PADS; pad++) if (pad_hit_glow(panel, pad)) glow = pad_hit_glow(panel, pad);
@@ -401,13 +463,7 @@ static void view_tel_play_stage(uint16_t *pixels, const struct panel *panel, uns
         view_picnic(pixels, VIEW_W - 3 - w, 68, chip, &picnic_M, TEL_STAGE);
     }
 
-    /* One picture: how the sound moves (the gated VCA as a box). */
-    view_rect(pixels, 8, 94, 224, 48, TEL_PLOT);
-    if (patch->amp_gate) {
-        view_slope(pixels, 12, 138, 8, 100, CHROME_BLUE);
-        view_slope(pixels, 20, 100, 200, 100, CHROME_BLUE);
-        view_slope(pixels, 220, 100, 8, 138, CHROME_BLUE);
-    } else view_tel_envelope(pixels, patch, 0, 12, 98, 216, 40);
+    view_tel_play_plot(pixels, panel, note);
     view_tel_keyboard(pixels, panel, note);
 }
 
@@ -690,13 +746,15 @@ static void view_tel_global_stage(uint16_t *pixels, const struct panel *panel)
     char keys[3] = {(char)('0' + (panel->midi_channel + 1u) / 10u), (char)('0' + (panel->midi_channel + 1u) % 10u), 0};
     char pads[3] = {(char)('0' + (panel->pad_midi_channel + 1u) / 10u), (char)('0' + (panel->pad_midi_channel + 1u) % 10u), 0};
     char profile[2] = {(char)('1' + panel->profile), 0};
-    const char *label[5] = {"KEYS CH", "PADS CH", "USB OUT", "PROFILE", "PEDAL"};
-    const char *value[5] = {keys, pads, panel->midi_tx ? "ON" : "OFF", profile, pedals[panel->pedal_mode]};
-    for (unsigned i = 0; i < 5; i++) {
+    static const char *const routes[] = {"OFF", "USB", "TRS", "BOTH"};
+    const char *label[6] = {"KEYS CH", "PADS CH", "MIDI OUT", "PROFILE", "PEDAL", "CLOCK OUT"};
+    const char *value[6] = {keys, pads, routes[panel->midi_tx & 3u], profile, pedals[panel->pedal_mode],
+                            panel->clock_out ? "ON" : "OFF"};
+    for (unsigned i = 0; i < 6; i++) {
         int x = 8 + (int)(i % 2u) * 114, y = 112 + (int)(i / 2u) * 23;
         view_rect(pixels, x, y, 110, 21, TEL_PLOT);
         view_small(pixels, x + 4, y + 7, label[i], DIM);
-        uint16_t ink = (i == 2 && panel->midi_tx) || (i == 4 && panel->pedal_down) ? CHROME_BLUE : INK;
+        uint16_t ink = (i == 2 && panel->midi_tx) || (i == 4 && panel->pedal_down) || (i == 5 && panel->clock_out) ? CHROME_BLUE : INK;
         view_picnic(pixels, x + 106 - view_picnic_width(value[i], &picnic_M), y + 1, value[i], &picnic_M, ink);
     }
 }
@@ -705,13 +763,20 @@ static void view_tel_global_stage(uint16_t *pixels, const struct panel *panel)
  * where it goes, big. Saving state on one line. */
 static void view_tel_assign_stage(uint16_t *pixels, const struct panel *panel)
 {
-    static const char *const sources[] = {"KNOB", "FADER", "PAD"};
+    static const char *const sources[] = {"KNOB", "FADER", "PAD", "MIDI CC"};
     unsigned source = panel->assign_source;
     unsigned slot = panel->assign_slot;
-    view_label_number(pixels, 8, 20, sources[source], slot + 1u, DIM, CHROME_BLUE);
+    view_label_number(pixels, 8, 20, sources[source], source == MAP_CC ? panel->cc_map.cc[slot % TG_LEARN_SLOTS] : slot + 1u,
+                      DIM, CHROME_BLUE);
     char info[16] = "PRE 1";
     info[4] = (char)('1' + panel->profile);
-    if (source != MAP_PAD) {
+    if (source == MAP_CC) {
+        static const char tmpl[] = "CC 00 OF 16";
+        unsigned n = 0;
+        for (unsigned i = 0; i < TG_LEARN_SLOTS; i++) n += panel->cc_map.cc[i] != 0;
+        for (unsigned i = 0; i < sizeof tmpl; i++) info[i] = tmpl[i];
+        info[3] = (char)('0' + n / 10u); info[4] = (char)('0' + n % 10u);
+    } else if (source != MAP_PAD) {
         unsigned bank = source == MAP_KNOB ? panel->knob_bank : panel->fader_bank;
         static const char tmpl[] = "BANK 1 PRE 1";
         for (unsigned i = 0; i < sizeof tmpl; i++) info[i] = tmpl[i];
@@ -735,7 +800,10 @@ static void view_tel_assign_stage(uint16_t *pixels, const struct panel *panel)
     char note[6];
     const char *dest;
     if (source == MAP_PAD) dest = jukebox_note_name(note, panel->pad_note[slot]);
-    else {
+    else if (source == MAP_CC) {
+        unsigned to = panel->cc_map.to[slot % TG_LEARN_SLOTS];
+        dest = to ? control_label[to - 1u] : "OFF";
+    } else {
         unsigned control = source == MAP_FADER ? panel->fader_map[panel->fader_bank][slot] :
                                                  panel->knob_map[panel->knob_bank][slot];
         dest = control_label[control];
@@ -746,10 +814,12 @@ static void view_tel_assign_stage(uint16_t *pixels, const struct panel *panel)
                          panel->library_status == LIB_WAIT_STOP ? "STOP TO SAVE" :
                          panel->library_status == LIB_WAIT_QUIET ? "WAITING FOR SILENCE" :
                          panel->library_status == LIB_FAILED ? "SAVE FAILED: REC RETRY" :
+                         panel->cc_full ? "16 CCS LEARNED: SET ONE OFF" :
+                         source == MAP_CC ? "CCS KEPT UNTIL POWER OFF" :
                          panel_layout_edited(panel) ? "LAYOUT EDITED" :
                          panel->library_dirty ? "LAYOUT NOT SAVED" :
                          panel->library_status == LIB_SAVED ? "LAYOUT SAVED" : NULL;
-    if (status) view_status_line(pixels, 162, status, panel_layout_edited(panel) || panel->library_dirty ? CORAL : DIM);
+    if (status) view_status_line(pixels, 162, status, panel_layout_edited(panel) || panel->library_dirty || panel->cc_full ? CORAL : DIM);
 }
 
 static const char *view_tel_library_name(const struct panel *panel, unsigned slot)
@@ -760,6 +830,39 @@ static const char *view_tel_library_name(const struct panel *panel, unsigned slo
     case LIB_IMPORTED: return library_imported(panel, slot)->sound.name;
     case LIB_SOUNDS: return user_library.patches[slot].name;
     default: return user_library.phrases[slot].name;
+    }
+}
+
+#include "sh101_charts.inc"
+/* The SH-101 owner's-manual chart behind a factory preset (64-111): sixteen sliders in the
+ * panel's order (MODULATOR, VCO, MIXER, VCF, ENV); a dashed rail is a control Roland left open. */
+static void view_tel_factory_chart(uint16_t *pixels, unsigned preset, int x, int y, int h)
+{
+    static const uint8_t groups[] = {1, 2, 4, 5, 4};
+    static const char *const names[] = {"MOD", "VCO", "MIXER", "VCF", "ENV"};
+    if (preset < SH101_CHART_FIRST || preset >= SH101_CHART_FIRST + SH101_CHARTS) return;
+    const uint8_t *chart = sh101_chart[preset - SH101_CHART_FIRST];
+    enum { COL = 12, GAP = 6 };
+    int top = y + 9, bottom = y + h - 2, col = x;
+    unsigned s = 0;
+    for (unsigned g = 0; g < 5u; g++) {
+        int width = groups[g] * COL;
+        if (width < 18) width = 18;
+        view_rect(pixels, col, y, width, h, TEL_PLOT);
+        view_small(pixels, col + 1, y + 1, names[g], DIM);
+        int off = (width - groups[g] * COL) / 2;
+        for (unsigned i = 0; i < groups[g]; i++, s++) {
+            int cx = col + off + (int)i * COL + COL / 2;
+            unsigned v = chart[s];
+            if (v == SH101_ANY) {
+                for (int yy = top; yy < bottom; yy += 4) view_rect(pixels, cx, yy, 1, 2, DIM);
+                continue;
+            }
+            view_rect(pixels, cx, top, 1, bottom - top, picnic_mix(TEL_GRID, DIM, 8u));
+            int cy = bottom - (int)(v * (unsigned)(bottom - top) / 100u);
+            view_rect(pixels, cx - 4, cy - 1, 9, 3, CHROME_CREAM);
+        }
+        col += width + GAP;
     }
 }
 
@@ -793,10 +896,12 @@ static void view_tel_library_stage(uint16_t *pixels, const struct panel *panel)
     unsigned base = panel->preset_bank * TG_PADS;
     unsigned centre = panel->library_kind == LIB_FACTORY ? panel->preset : panel->library_slot;
     if (centre < base || centre >= base + TG_PADS) centre = base;
+    unsigned chart = panel->library_kind == LIB_FACTORY && !panel->save_mode &&
+                     centre >= SH101_CHART_FIRST && centre < SH101_CHART_FIRST + SH101_CHARTS;
     if (!panel->save_mode) {
         for (int d = -1; d <= 1; d++) {
             int slot = (int)centre + d;
-            if (slot < (int)base || slot >= (int)(base + TG_PADS)) continue;
+            if (slot < (int)base || slot >= (int)(base + TG_PADS) || (chart && d > 0)) continue;
             const char *name = view_tel_library_name(panel, (unsigned)slot);
             if (!d) {
                 view_rect(pixels, 0, 64, VIEW_W, 46, library_selected(panel, (unsigned)slot) ? CHROME_CREAM : TEL_FILL);
@@ -810,13 +915,14 @@ static void view_tel_library_stage(uint16_t *pixels, const struct panel *panel)
     }
     for (unsigned pad = 0; pad < TG_PADS; pad++) {
         unsigned slot = base + pad;
-        int x = 8 + (int)(pad % 8u) * 28, y = 138 + (int)(pad / 8u) * 10;
+        int x = 8 + (int)(pad % 8u) * 28, y = chart ? 152 + (int)(pad / 8u) * 5 : 138 + (int)(pad / 8u) * 10;
         uint16_t c = library_selected(panel, slot) ? CHROME_BLUE : slot == centre ? TEL_FILL :
                      view_tel_library_name(panel, slot) ? TEL_GRID : TEL_PLOT;
         unsigned glow = pad_hit_glow(panel, pad);
         if (glow) c = picnic_mix(c, CHROME_CREAM, glow * 3u);
-        view_rect(pixels, x, y, 26, 8, c);
+        view_rect(pixels, x, y, 26, chart ? 4 : 8, c);
     }
+    if (chart) view_tel_factory_chart(pixels, centre, 8, 113, 37);
     if (panel->save_mode) {
         view_status_line(pixels, 42, panel->save_mode == SAVE_PICK ? "CHOOSE A PAD" :
                          library_occupied(panel, panel->library_slot) ? "REC REPLACES IT" : "REC STORES IT", CORAL);
@@ -1017,7 +1123,10 @@ static void view_telegram(uint16_t *pixels, const struct panel *panel, unsigned 
         view_text(pixels, 180, 192, "K5 TX", 1, DIM);
         view_num(pixels, 10, 216, panel->midi_channel + 1u, 2, SKY);
         view_num(pixels, 95, 216, panel->pad_midi_channel + 1u, 2, SKY);
-        view_text(pixels, 180, 216, panel->midi_tx ? "ON" : "OFF", 1, panel->midi_tx ? LIME : DIM);
+        {
+            static const char *const routes[] = {"OFF", "USB", "TRS", "BOTH"};
+            view_text(pixels, 180, 216, routes[panel->midi_tx & 3u], 1, panel->midi_tx ? LIME : DIM);
+        }
         return;
     } else if (panel->page == PAGE_FX) {
         static const char *const glide[] = {"OFF", "AUTO", "ON"};
@@ -1121,14 +1230,20 @@ static void view_telegram(uint16_t *pixels, const struct panel *panel, unsigned 
         if (sound->patch.filter_low) view_text(pixels, 142, 205, "LOW", 1, SKY);
         if (sound->patch.env_wide) view_text(pixels, 174, 205, "ENV X2", 1, CORAL);
     } else if (panel->page == PAGE_ASSIGN) {
-        static const char *const source[] = {"KNOB", "FADER", "PAD"};
+        static const char *const source[] = {"KNOB", "FADER", "PAD", "CC"};
         view_text(pixels, 10, 55, source[panel->assign_source], 2, INK);
-        view_num(pixels, 125, 61, panel->assign_slot + 1u, 2, LIME);
-        if (panel->assign_source != MAP_PAD) {
+        view_num(pixels, 125, 61, panel->assign_source == MAP_CC ? panel->cc_map.cc[panel->assign_slot % TG_LEARN_SLOTS] :
+                                                                 panel->assign_slot + 1u, 2, LIME);
+        if (panel->assign_source != MAP_PAD && panel->assign_source != MAP_CC) {
             view_text(pixels, 174, 55, "BANK", 1, DIM);
             view_num(pixels, 192, 70, (panel->assign_source == MAP_KNOB ? panel->knob_bank : panel->fader_bank) + 1u, 1, SKY);
         }
-        if (panel->assign_source == MAP_PAD) {
+        if (panel->assign_source == MAP_CC) {
+            unsigned to = panel->cc_map.to[panel->assign_slot % TG_LEARN_SLOTS];
+            view_text(pixels, 10, 111, to ? control_label[to - 1u] : "OFF", 2, LIME);
+            view_text(pixels, 10, 160, "KEPT UNTIL POWER OFF", 1, DIM);
+            view_text(pixels, 10, 184, "< > CHANGE DESTINATION", 1, INK);
+        } else if (panel->assign_source == MAP_PAD) {
             view_note(pixels, 10, 111, panel->pad_note[panel->assign_slot], 2, LIME);
             view_text(pixels, 10, 160, "PLAY A KEY TO ASSIGN", 1, DIM);
             view_text(pixels, 10, 184, "< > MOVE BY SEMITONE", 1, INK);
@@ -1298,29 +1413,28 @@ static void view_telegram(uint16_t *pixels, const struct panel *panel, unsigned 
 
 #ifdef ELITE_SYNTH_PRESETS
 #ifdef ELITE_ACID_DUETS
-/* Acid Duets: one BB1 group per page. Left, the parts as duets (pads 1-8);
- * right, the same parts as this synth's half alone (pads 9-16). */
+/* Acid Duets: sixteen whole duets to a page, the pads as they sit (1-8 left, 9-16 right). The duet
+ * last played is lit; its group and bass line lead the screen. */
 static void view_acid_duets(uint16_t *pixels, const struct panel *panel)
 {
     unsigned count, start = duet_group_start(panel->synth_preset_page, &count);
     unsigned page = panel->synth_preset_page + 1u, pages = duet_groups();
     char position[] = {(char)('0' + page / 10u), (char)('0' + page % 10u),
                        '/', (char)('0' + pages / 10u), (char)('0' + pages % 10u), 0};
-    view_picnic(pixels, 8, 22, factory_synth_duets[start].group, &picnic_M, CHROME_CREAM);
-    view_small(pixels, VIEW_W - 8 - view_small_width(position), 26, position, INK);
-    view_small(pixels, 4, 41, "DUET", DIM);
-    view_small(pixels, 122, 41, panel->synth_preset_dillo ? "BASS ONLY" : "LEAD ONLY", DIM);
-    uint16_t own = panel->synth_preset_dillo ? CHROME_303 : CHROME_ELITE;
+    unsigned lit = panel->synth_duet_selected && panel->synth_duet_selected - 1u >= start &&
+                   panel->synth_duet_selected - 1u < start + count ? panel->synth_duet_selected - 1u : start;
+    view_picnic(pixels, 8, 21, "ACID DUETS", &picnic_S, CHROME_RED);
+    view_picnic(pixels, VIEW_W - 8 - view_picnic_width(position, &picnic_S), 21, position, &picnic_S, DIM);
+    jukebox_big(pixels, 8, 36, VIEW_W - 16, factory_synth_duets[lit].group, CHROME_CREAM);
+    view_small(pixels, 8, 70, "BASS AND LEAD TOGETHER", DIM);
     for (unsigned part = 0; part < count; part++) {
-        unsigned index = start + part + 1u, selected = index == panel->synth_duet_selected;
-        const char *name = factory_dillo_phrases[factory_synth_duets[start + part].bass].name;
-        int y = 54 + (int)part * 14;
-        view_rect(pixels, 4, y, selected ? 114 : 3, 12, selected ? CHROME_CREAM : EDGE);
-        view_small(pixels, 10, y + 1, name, selected ? PAPER : INK);
-        view_rect(pixels, 122, y, 3, 12, own);
-        view_small(pixels, 128, y + 1, name, DIM);
+        unsigned index = start + part, selected = index + 1u == panel->synth_duet_selected;
+        const char *name = factory_dillo_name(factory_synth_duets[index].bass);
+        int x = part < 8u ? 4 : 122, y = 84 + (int)(part % 8u) * 11;
+        view_rect(pixels, x, y, selected ? 114 : 3, 10, selected ? CHROME_CREAM : EDGE);
+        view_small(pixels, x + 6, y, name, selected ? PAPER : INK);
     }
-    view_small(pixels, 8, 167, "< > OR K1 GROUP  CHORD KEEPS SOUND", DIM);
+    view_small(pixels, 8, 174, "< > OR K1 PAGE  CHORD KEEPS SOUND", DIM);
 }
 #endif
 
@@ -1395,7 +1509,7 @@ static void view_synth_presets(uint16_t *pixels, const struct panel *panel)
         char caps[32];
         const char *src = jukebox_caps(source, caps);
         view_picnic(pixels, 8, 74, src, view_picnic_width(src, &picnic_M) <= VIEW_W - 16 ? &picnic_M : &picnic_S, accent);
-        const char *what = duets ? "PADS 1-8: BOTH" : dillo ? "303 PATTERN" : "101 PATTERN";
+        const char *what = duets ? "BASS AND LEAD" : dillo ? "303 PATTERN" : "101 PATTERN";
         view_picnic(pixels, 8, 102, what, &picnic_M, DIM);
         if (has_bass) synth_contour(pixels, 1, bass, has_lead ? 128 : 132, has_lead ? 22 : 36, SKY, hold);
         if (has_lead) synth_contour(pixels, 0, lead, has_bass ? 152 : 132, has_bass ? 22 : 36, LIME, hold);

@@ -4,15 +4,23 @@
 static uint8_t midi_sent[MIDI_CHANNELS][16];
 static uint16_t midi_sent_channels;
 static uint32_t midi_tx_reset_seen;
+static uint8_t midi_pc_seen;
 
 static void midi_send_panel(const struct panel *panel)
 {
-    if (!usb.config || midi_tx_reset_seen != usb.resets) {
+    /* MIDI OUT: 1 USB, 2 TRS, 3 both. The TRS jack needs no computer, so only a USB-only route waits for one. */
+    unsigned trs = panel->midi_tx & 2u, usb_up = usb.config && !usb.suspended;
+    if ((!usb.config && !trs) || midi_tx_reset_seen != usb.resets) {
         memset(midi_sent, 0, sizeof midi_sent);
         midi_sent_channels = 0;
         midi_tx_reset_seen = usb.resets;
     }
-    if (!usb.config || usb.suspended || updating || usb.ota_req || usb.uboot_req) return;
+    if (!(usb_up || trs) || updating || usb.ota_req || usb.uboot_req) return;
+    if (panel->band_pc_seq != midi_pc_seen) {
+        midi_pc_seen = panel->band_pc_seq;
+        if (panel->midi_tx)
+            elite_midi_out(0x0cu | (0xc0u | panel->midi_channel) << 8 | (uint32_t)(panel->band_pc & 0x7fu) << 16);
+    }
     uint64_t keys = panel->midi_tx && !panel->record && panel->page != PAGE_ASSIGN ? keyboard.down : 0;
     uint16_t pads_down = panel->midi_tx ? panel->pads_down : 0;
     if (!(keys || pads_down || midi_sent_channels)) return;
@@ -54,7 +62,7 @@ static void midi_send_panel(const struct panel *panel)
                 if (!!velocity == on && was_on != on) {
                     if (mo_w - mo_r >= MQ) return;
                     unsigned cin = 8u + on;
-                    midi_out_event(cin | ((cin << 4) | ch) << 8 | note << 16 | velocity << 24);
+                    elite_midi_out(cin | ((cin << 4) | ch) << 8 | note << 16 | velocity << 24);
                     sent[byte] ^= (uint8_t)bit;
                     if (on) midi_sent_channels |= (uint16_t)(1u << ch);
                 }
@@ -63,4 +71,55 @@ static void midi_send_panel(const struct panel *panel)
             if (!any) midi_sent_channels &= (uint16_t)~(1u << ch);
         }
     }
+}
+
+/* Sideman: the browser guide follows BB-37 through one 19-byte SysEx
+ * state message on USB, sent when something it shows changes, at most every 40 ms, and again after
+ * every USB reset so a page that opens later still hears where the instrument is. */
+static uint8_t sideman_sent[TG_SIDEMAN_BYTES];
+static uint32_t sideman_reset_seen = UINT32_MAX, sideman_ms;
+
+static void sideman_fill(const struct panel *panel, tg_sideman_state *s)
+{
+    *s = (tg_sideman_state){.page = panel->page, .bank = panel->knob_bank, .knob = TG_SIDEMAN_NONE};
+    s->mode = panel->perform_view ? 3 : panel->save_mode ? 2 : 0;
+#ifdef ELITE_DRUMS808
+    if (panel->page == PAGE_DILLO_SOUND) s->bank = panel->dillo_sound_bank;
+    else if (panel->page == PAGE_DRUM_PRESETS) s->bank = panel->drum_preset_bank;
+#ifdef ELITE_SYNTH_PRESETS
+    else if (panel->page == PAGE_SYNTH_PRESETS) s->bank = panel->synth_preset_page;
+#endif
+    if (panel->library_open && !s->mode) s->mode = 1;
+    if (panel->strip_knob) s->knob = (uint8_t)(panel->strip_knob - 1u);
+#endif
+    s->bpm = panel->sound.tempo;
+#ifdef ELITE_DRUMS808
+    s->instrument = (uint8_t)instrument_of_page(panel->page, panel);
+#endif
+    s->running = panel->sound.running != 0;
+#ifdef ELITE_BAND_PRESETS
+    if (panel->band_preset)
+        for (unsigned g = 0; g < conductor_band_groups(); g++)
+            if (panel->band_preset - 1u >= factory_band_groups[g].start &&
+                panel->band_preset - 1u < factory_band_groups[g].start + factory_band_groups[g].count)
+                s->section = (uint8_t)(g + 1u);
+#endif
+    s->fx_tab = panel->perform_fx;
+}
+
+static void midi_send_sideman(const struct panel *panel)
+{
+    if (!usb.config || usb.suspended || updating || usb.ota_req || usb.uboot_req) return;
+    tg_sideman_state state;
+    uint8_t message[TG_SIDEMAN_BYTES];
+    sideman_fill(panel, &state);
+    tg_sideman_encode(&state, TG_SIDEMAN_FW_BB37, message);
+    unsigned fresh = sideman_reset_seen != usb.resets;
+    if (!fresh && (!memcmp(message, sideman_sent, sizeof message) || (uint32_t)(fm1_ms - sideman_ms) < 40u)) return;
+    uint32_t packets[TG_SIDEMAN_PACKETS];
+    unsigned n = tg_sideman_packets(message, sizeof message, packets, TG_SIDEMAN_PACKETS);
+    if (!elite_usb_burst(packets, n)) return; /* the ring is busy: next loop */
+    memcpy(sideman_sent, message, sizeof message);
+    sideman_reset_seen = usb.resets;
+    sideman_ms = fm1_ms;
 }

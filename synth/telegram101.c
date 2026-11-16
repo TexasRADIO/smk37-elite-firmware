@@ -13,7 +13,7 @@ static float clamp(float value, float lo, float hi)
 }
 
 /* Effective articulation model measured through public reference audio/PWM.
- * See research/TAL-ARTICULATION-MODEL-20261106.md. The shared envelope remains
+ * The shared envelope remains
  * linear; only the amplifier has the small closing offset. */
 static float envelope_release_flow(float envelope)
 {
@@ -790,7 +790,7 @@ int tg_render(tg_voice *voice, int32_t *stereo, unsigned frames)
     const tg_controls *c = &voice->controls;
     const tg_patch *patch = &c->patch;
     float *p = voice->smooth;
-    float level = U7(c->master) * 0.43f;
+    float level = U7(voice->fixed_master ? voice->fixed_master : c->master) * 0.43f;
     float mod = U7(c->mod);
     float drive = U7(patch->drive);
     float accent_tone = U7(patch->accent_tone) * (3.0f * 0.09119275f);

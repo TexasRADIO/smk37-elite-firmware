@@ -9,6 +9,8 @@
 enum { MIX_TELEGRAM, MIX_DILLO, MIX_808, MIX_LANES, MIX_808_B = MIX_LANES, MIX_AUDIO_LANES };
 enum { MIX_LEVEL, MIX_PAN, MIX_DELAY, MIX_ROOM, MIX_DRIVE, MIX_CONTROLS };
 enum { CONDUCTOR_DILLO_START_DRIVE = 48, CONDUCTOR_TELEGRAM_START_DRIVE = 36 };
+/* The master passed to the mix is MAIN: 64 is unity, 127 about +6 dB, 0 silent. */
+enum { CONDUCTOR_MASTER_UNITY = 64 };
 typedef struct { uint8_t value[MIX_LANES][MIX_CONTROLS]; } conductor_mixer;
 
 #define CONDUCTOR_MIX_DEFAULT {{{127,64,0,0,0}, {127,64,0,0,0}, {127,64,0,0,0}}}

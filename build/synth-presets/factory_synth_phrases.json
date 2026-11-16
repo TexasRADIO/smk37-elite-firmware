@@ -21,7 +21,7 @@
       "sha256": "a38289957fe02b6c09f22c18295588b426192a07d293d8d26af73ec8fd3a0bc0"
     }
   },
-  "include_sha256": "e56c894339d9c09ae08d271a9de72025d3c1f5a0219cc66b3191a0668420a624",
+  "include_sha256": "5cfd1e123c033c68473684825fe90beb2a2922654b499c898c2f3758efcb1cd1",
   "entries": {
     "dillo": [
       {
@@ -138266,7 +138266,7 @@
           73,
           0
         ],
-        "why": "F# major bass that never rests. A machine-pop line climbs C#, D#, F# against it, then the leading note F turns back to F# and steps down home. Rewritten after Joe heard the robot-octave version."
+        "why": "F# major bass that never rests. A machine-pop line climbs C#, D#, F# against it, then the leading note F turns back to F# and steps down home."
       },
       {
         "source": "acid_duets",
@@ -138365,7 +138365,7 @@
           196,
           0
         ],
-        "why": "Db major bass, centred on Ab. Chicken-picked Ab repeats walk up the chord to Eb, then step back down to Ab. Renamed and rewritten after Joe heard the first version."
+        "why": "Db major bass, centred on Ab. Chicken-picked Ab repeats walk up the chord to Eb, then step back down to Ab."
       },
       {
         "source": "acid_duets",
@@ -138464,7 +138464,7 @@
           199,
           0
         ],
-        "why": "B minor bass with chromatic passing notes. A 3-3-2 stab on B rises through the minor third to E and falls back to B. Rewritten after Joe heard the first version."
+        "why": "B minor bass with chromatic passing notes. A 3-3-2 stab on B rises through the minor third to E and falls back to B."
       },
       {
         "source": "acid_duets",

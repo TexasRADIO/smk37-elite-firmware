@@ -20,10 +20,28 @@
 #include "cr_bootguard.h"
 
 #include "library_region.h"
+#ifdef ELITE_PERCUSSION_727
+/* The 727 build may also write the three sound-pool windows (board/percussion_load.h), the same
+ * windows percussion_flash_range accepts. The driver's FL_PROTECTED net still applies. */
+#define FL_RANGE_OK(off, n) (FL_IN(off, n, FL_OTA_LO, FL_OTA_HI) || \
+                             FL_IN(off, n, ELITE_LIBRARY_LO, ELITE_LIBRARY_HI) || \
+                             FL_IN(off, n, FL_SMP_LO, FL_SMP_HI) || \
+                             FL_IN(off, n, ELITE_LIBRARY_HI, FL_OTA_LO) || \
+                             FL_IN(off, n, FL_DATA_LO, ELITE_LIBRARY_LO))
+#else
 #define FL_RANGE_OK(off, n) (FL_IN(off, n, FL_OTA_LO, FL_OTA_HI) || \
                              FL_IN(off, n, ELITE_LIBRARY_LO, ELITE_LIBRARY_HI))
+#endif
 #include "fm1_flash.h"
 #ifdef ELITE_PERCUSSION_727
+/* Build 813 shipped without the windows in FL_RANGE_OK, so the first erase was refused: every
+ * window's first and last sector must pass the driver's own guard. */
+_Static_assert(FL_GUARD(FL_DATA_LO, 0x1000u) && FL_GUARD(ELITE_LIBRARY_LO - 0x1000u, 0x1000u) &&
+               FL_GUARD(ELITE_LIBRARY_HI, 0x1000u) && FL_GUARD(FL_OTA_LO - 0x1000u, 0x1000u) &&
+               FL_GUARD(FL_SMP_LO, 0x1000u) && FL_GUARD(FL_SMP_HI - 0x1000u, 0x1000u),
+               "727 pool windows must be writable by the flash driver");
+_Static_assert(!FL_GUARD(FL_APP_HI - 0x1000u, 0x1000u) && !FL_GUARD(FL_CAL_LO, 0x1000u),
+               "the 727 build must not open the app or calibration");
 #include "percussion_flash.h"
 #include "percussion_flash.inc"
 static percussion_bank percussion_assets;
@@ -36,6 +54,52 @@ static percussion_bank percussion_assets;
 
 static volatile uint32_t fm1_ms;
 #include "usb.c"
+#include "synth/clockout101.h"
+#include "synth/miditrs101.h"
+#include "synth/scope101.h"
+#include "synth/perform101.h"
+#include "synth/sideman101.h"
+#include "board/smk_uart_tx.h"
+
+/* MIDI OUT routing (GLOBAL > MIDI OUT) and clock out, set by the foreground each loop. The audio ISR is a
+ * second producer of USB-MIDI packets (clock), so the foreground sends with interrupts held. */
+static tg_trs_out trs_out;
+static tg_clockout clockout;
+/* Telegram's live waveform: the audio ISR writes, the play page reads (see synth/scope101.h). */
+static tg_scope scope;
+#define TG_SCOPE_LIVE (&scope)
+/* PERFORM (hold FX + the lowest octave): the foreground publishes what is held; the audio ISR plays it. */
+static tg_perform perform;
+/* In .bss, not .pool: same internal SRAM, and it leaves the pool room for the 727 layer. */
+static int16_t perform_ring[TG_PERF_RING] __attribute__((aligned(16)));
+static volatile uint8_t perform_fx_on, perform_filters_on, perform_mutes_on;
+static volatile uint8_t midi_route = TG_MIDI_ROUTE_USB, clock_out_on, trs_ready;
+
+static void elite_midi_out_isr(uint32_t packet)
+{
+    if (midi_route & TG_MIDI_ROUTE_USB) midi_out_event(packet);
+    if ((midi_route & TG_MIDI_ROUTE_TRS) && trs_ready) (void)tg_trs_queue(&trs_out, packet);
+}
+
+static void elite_midi_out(uint32_t packet)
+{
+    uint32_t icfg = fm1_icfg();
+    fm1_irq_off();
+    elite_midi_out_isr(packet);
+    fm1_icfg_set(icfg);
+}
+/* USB only: the Sideman state message is for the browser guide, never the TRS jack. All of its packets
+ * go in together or none do (a clock pulse from the audio ISR cannot split it), so a full ring never
+ * leaves half a SysEx on the wire. */
+static unsigned elite_usb_burst(const uint32_t *packets, unsigned n)
+{
+    uint32_t icfg = fm1_icfg();
+    fm1_irq_off();
+    unsigned ok = usb.config && MQ - (mo_w - mo_r) >= n;
+    for (unsigned i = 0; ok && i < n; i++) midi_out_event(packets[i]);
+    fm1_icfg_set(icfg);
+    return ok;
+}
 #include "board/ota_trace.h"
 
 volatile uint32_t elite_ota_trace __attribute__((section(".noinit")));
@@ -61,6 +125,7 @@ enum audio_fault_reason {
 };
 
 #include "panel101.inc"
+#include "editor_protocol.inc"
 #include "pad_feedback.inc"
 #include "instrument_view.inc"
 
@@ -149,6 +214,10 @@ void fm1_timer5_irq(void)
     uint32_t start = fm1_ticks();
     fm1_timer5_ack();
     fm1_input_tick();
+    if (trs_ready) {
+        int byte = tg_trs_tick(&trs_out, smk_uart1_tx_done());
+        if (byte >= 0) smk_uart1_tx_byte((uint32_t)byte);
+    }
     input_ticks += fm1_ticks() - start;
 }
 
@@ -224,10 +293,22 @@ static inline void record_kit_commits(unsigned lanes, uint32_t ticks, unsigned r
 }
 #endif
 
+#ifdef ELITE_PERCUSSION_727
+/* The 727 renders only while it still fits: it is skipped for the block when the other parts have used
+ * more than this since the callback began (measured 14 November: 727 0.57 ms, mixer and the rest
+ * 0.71 ms at the cymbal bench's worst block; the guard is 5.00 ms). */
+enum { DRUMS_B_LATEST_TICKS = COMMIT_TICKS - 1650u * 24u };
+static uint32_t audio_block_start;
+static unsigned drums_b_fits(void) { return fm1_ticks() - audio_block_start < DRUMS_B_LATEST_TICKS; }
+#endif
+
 void fm1_alnk0_irq(void)
 {
     uint32_t scan_start = input_ticks;
     uint32_t start = fm1_ticks();
+#ifdef ELITE_PERCUSSION_727
+    audio_block_start = start;
+#endif
     uint8_t pending = fm1_audio_pending();
     fm1_audio_ack_aux(pending);
     if (!(pending & FM1_AUDIO_HALF))
@@ -258,6 +339,12 @@ void fm1_alnk0_irq(void)
         tg_apply(&engine, &applied);
 #endif
     }
+    /* Echoes on 1/8 and the 1/4 triplet: the knob's tempo, or the source's beat when following clock
+     * (12 pulses an eighth; changes under 0.5% are its jitter and are left alone). */
+    if (applied.clock.source == TG_CLOCK_USB && applied.clock.period_us)
+        tg_fx_set_eighth(&effects, (applied.clock.period_us * 5292u + 5000u) / 10000u, 5);
+    else
+        tg_fx_set_tempo(&effects, applied.tempo);
     uint32_t render_start = fm1_ticks();
 #ifdef ELITE_DRUMS808
     unsigned edge_before;
@@ -277,6 +364,8 @@ void fm1_alnk0_irq(void)
         }
     }
 #endif
+    tg_scope_write(&scope, scratch, HALF_WORDS / 2u); /* Telegram alone, before drums and Dillo */
+    tg_perform_lane(&perform, 0, scratch, HALF_WORDS / 2u, 2, perform_mutes_on & 1u);
 #ifdef ELITE_DRUMS808
 #ifdef ELITE_RENDER_PROFILE
     uint32_t telegram_ticks = fm1_ticks() - render_start;
@@ -303,6 +392,9 @@ void fm1_alnk0_irq(void)
 #ifdef ELITE_RENDER_PROFILE
     uint32_t mixer_start = fm1_ticks();
 #endif
+    tg_perform_lane(&perform, 1, dillo_dry, HALF_WORDS / 2u, CONDUCTOR_DRY_STRIDE, perform_mutes_on & 2u);
+    tg_perform_lane(&perform, 2, drums_dry, HALF_WORDS / 2u, CONDUCTOR_DRY_STRIDE, perform_mutes_on & 4u);
+    tg_perform_lane(&perform, 3, second_dry, HALF_WORDS / 2u, CONDUCTOR_DRY_STRIDE, perform_mutes_on & 8u);
     conductor_mix_audio_prepared(&mixer_audio, &effects, scratch, dillo_dry, drums_dry, second_dry,
                                  HALF_WORDS / 2u, &mix_requested, applied.master);
 #ifdef ELITE_RENDER_PROFILE
@@ -321,6 +413,14 @@ void fm1_alnk0_irq(void)
     const dillo_layer *playing_dillo = &dillo;
 #endif
 #endif
+    tg_perform_render(&perform, scratch, HALF_WORDS / 2u, applied.tempo,
+                      perform_fx_on ? perform_fx_on - 1u : TG_PF_NONE, perform_filters_on);
+    if (clock_out_on || clockout.running) {
+        uint8_t events[TG_CLOCKOUT_MAX_EVENTS];
+        unsigned playing = clock_out_on && applied.clock.source == TG_CLOCK_INTERNAL && applied.running;
+        unsigned n = tg_clockout_block(&clockout, playing, applied.tempo, HALF_WORDS / 2u, events);
+        for (unsigned i = 0; i < n; i++) elite_midi_out_isr(0x0fu | (uint32_t)events[i] << 8);
+    }
     uint32_t render_end = fm1_ticks();
     /* Keep the same DMA safety limits as the review build. Record which
      * limit stopped playback before any attempted write to a busy half. */
@@ -925,6 +1025,121 @@ static void elite_usb_audio_send(uint16_t length)
     e0_send((const uint8_t *)&status, sizeof status, length);
 }
 
+#ifdef ELITE_PERCUSSION_727
+#include "percussion_load.h"
+/* The 727 pool arrives over USB MIDI (tools/provision_727.py): no ROM mode, no flasher. */
+static p727_stage pool_stage;
+static int pool_last_rc; /* the driver's own result for the last erase or page write, sent with a commit */
+static int pool_read(void *context, uint32_t offset, uint8_t *out, uint32_t n)
+{
+    (void)context;
+    const volatile uint8_t *flash = (const volatile uint8_t *)FL_XIP(offset);
+    for (uint32_t i = 0; i < n; i++) out[i] = flash[i];
+    return 0;
+}
+static int pool_erase(void *context, uint32_t offset)
+{
+    (void)context;
+    uint32_t took;
+    fm1_wdt_feed();
+    int rc = fl_erase4k(offset, &took);
+    fm1_wdt_feed();
+    pool_last_rc = rc;
+    return rc;
+}
+static int pool_program(void *context, uint32_t offset, const uint8_t *data, uint32_t n)
+{
+    (void)context;
+    int rc = fl_write(offset, data, n);
+    if (rc) pool_last_rc = rc;
+    return rc;
+}
+static const p727_io pool_io = {0, pool_read, pool_erase, pool_program};
+
+static void pool_unmount(struct panel *next)
+{
+    if (!next->layer_available) return;
+    uint32_t f = irq_save();
+    percussion_init(&launch.drums_b.percussion, 0); /* the renderer skips a layer with no bank */
+    irq_restore(f);
+    next->layer_available = 0;
+}
+
+static unsigned pool_mount(struct panel *next)
+{
+    if (next->layer_available || safe_mode) return next->layer_available;
+    if (!percussion_flash_open(&percussion_assets, fm1_xip_ptr(0), percussion_flash_clips, percussion_flash_sizes,
+                               percussion_flash_crc, fm1_wdt_feed))
+        return 0;
+    next->layer_available = 1;
+    if (next->drums_b.percussion_kit) {
+        uint32_t f = irq_save();
+        conductor_set_percussion_kit(&launch, &percussion_assets, next->drums_b.percussion_kit - 1u);
+        irq_restore(f);
+    }
+    return 1;
+}
+
+static int pool_message(struct panel *next)
+{
+    const uint8_t *message;
+    uint32_t length;
+    if (!ota_frame_get(&message, &length) || length < 4 || memcmp(message, "\x7d\x45\x4c", 3) ||
+        message[3] < 0x10 || message[3] > 0x14)
+        return 0;
+    unsigned command = message[3];
+    uint8_t reply[320] = {0xf0, 0x7d, 0x45, 0x4c, (uint8_t)(command + 0x40)};
+    uint32_t n = 5;
+    uint8_t chunk[P727_LOAD_CHUNK];
+    if (command == 0x10 && length == 9) {
+        uint32_t offset = p727_get21(message + 4), size = message[7] | (uint32_t)message[8] << 7;
+        int rc = p727_read(&pool_io, offset, chunk, size);
+        p727_put21(reply + n, offset);
+        n += 3;
+        reply[n++] = (uint8_t)rc;
+        if (rc == P727_OK) n += p727_pack7(chunk, size, reply + n);
+    } else if (command == 0x11 && length > 8) {
+        uint32_t sector = p727_get21(message + 4);
+        unsigned part = message[7];
+        int rc = p727_unpack7(message + 8, length - 8, chunk, sizeof chunk) == P727_LOAD_CHUNK ?
+                 p727_stage_chunk(&pool_stage, sector, part, chunk) : P727_BAD;
+        p727_put21(reply + n, sector);
+        n += 3;
+        reply[n++] = (uint8_t)part;
+        reply[n++] = (uint8_t)rc;
+    } else if (command == 0x12 && length == 12) {
+        uint32_t sector = p727_get21(message + 4), crc = p727_get35(message + 7);
+        int busy = safe_mode || next->sound.running || next->sound.clock.state == TG_CLOCK_RUNNING ||
+                   bench_result == BENCH_RUNNING;
+        if (!busy) pool_unmount(next);
+        pool_last_rc = 0;
+        int rc = p727_commit(&pool_stage, &pool_io, sector, crc, busy);
+        p727_put21(reply + n, sector);
+        n += 3;
+        reply[n++] = (uint8_t)rc;
+        reply[n++] = (uint8_t)((pool_last_rc < 0 ? -pool_last_rc : pool_last_rc) & 127); /* driver detail */
+    } else if (command == 0x13 && length == 4) {
+        reply[n++] = (uint8_t)pool_mount(next);
+    } else if (command == 0x14 && length == 4) {
+        reply[n++] = ELITE_BUILD / 100;
+        reply[n++] = ELITE_BUILD % 100;
+        reply[n++] = next->layer_available;
+        reply[n++] = (uint8_t)(next->sound.running || bench_result == BENCH_RUNNING);
+        uint32_t shed = launch.drums_b_shed;
+        p727_put21(reply + n, shed > 0x1fffffu ? 0x1fffffu : shed); /* 727 blocks skipped under load */
+        n += 3;
+    } else {
+        ota_frame_done();
+        return 1; /* ours, but malformed: drop it */
+    }
+    ota_frame_done();
+    reply[n++] = 0xf7;
+    ota_wire_send(reply, n);
+    return 1;
+}
+#endif
+
+
 static void elite_usb_activity_send(uint16_t length)
 {
     static elite_usb_activity status;
@@ -1137,6 +1352,9 @@ static void main_loop(void)
 #ifdef ELITE_DRUMS808
     conductor_init(&launch);
 #ifdef ELITE_PERCUSSION_727
+    launch.drums_b_fits = drums_b_fits;
+#endif
+#ifdef ELITE_PERCUSSION_727
     if (next.layer_available)
         conductor_set_percussion_kit(&launch, &percussion_assets, next.drums_b.percussion_kit - 1u);
 #endif
@@ -1155,6 +1373,7 @@ static void main_loop(void)
     dillo_layer_init(&dillo);
 #endif
     requested = applied = next.sound;
+    tg_perform_init(&perform, perform_ring);
     last_ms_tick = fm1_ticks();
     usb_start();
     ota_wire_mark();
@@ -1196,9 +1415,44 @@ static void main_loop(void)
 #endif
         read_performance(&next, visible_pad_head);
         live_strikes += (uint8_t)(next.sound.live_trigger - requested.live_trigger);
+        {
+            unsigned route = next.midi_tx;                 /* GLOBAL > MIDI OUT: OFF, USB, TRS, BOTH */
+            if ((route & TG_MIDI_ROUTE_TRS) && !trs_ready) {
+                uint32_t icfg = fm1_icfg();
+                fm1_irq_off();
+                smk_uart1_tx_init();
+                trs_ready = 1;
+                fm1_icfg_set(icfg);
+            }
+            /* OFF keeps the last route, so note-offs and Stop leave where the notes went. A change while notes
+             * sound closes them on the old route first (All Notes Off per channel); the new one starts clean. */
+            unsigned want = route ? route : midi_route;
+            if (want != midi_route && midi_sent_channels) {
+                for (unsigned ch = 0; ch < MIDI_CHANNELS; ch++)
+                    if (midi_sent_channels & (1u << ch)) elite_midi_out(0x0bu | (0xb0u | ch) << 8 | 123u << 16);
+                memset(midi_sent, 0, sizeof midi_sent);
+                midi_sent_channels = 0;
+            }
+            midi_route = (uint8_t)want;
+            clock_out_on = next.clock_out;
+            perform_fx_on = next.perform_fx;
+            perform_filters_on = next.perform_filters;
+            perform_mutes_on = next.perform_mutes;
+#ifdef ELITE_PERCUSSION_727
+            for (unsigned t = 0; t < P727_TRACKS; t++) { /* the 727 page's knobs, read by the renderer */
+                unsigned g = (unsigned)next.layer_mix[layer_track_group[t]] * next.layer_mix[7] * 128u / 10000u;
+                launch.drums_b.percussion.track_gain[t] = (uint8_t)(g > 255u ? 255u : g);
+            }
+#endif
+        }
+        midi_send_sideman(&next);
         midi_send_panel(&next);
         bench_tick(&next);
-        if (!bench_message(&next))
+#ifdef ELITE_PERCUSSION_727
+        if (!editor_message(&next) && !pool_message(&next) && !bench_message(&next))
+#else
+        if (!editor_message(&next) && !bench_message(&next))
+#endif
             ota_service();
 #ifdef ELITE_SINGLE_808
         bench_restore_view(&next);
@@ -1310,9 +1564,13 @@ static void main_loop(void)
         library_service(&next);
         if (resume_after_ota || (next_strip >= VIEW_H && fm1_ms - ui_time >= 45u)) {
             unsigned head = panel_head(&next);
-            unsigned strip_expired = 0, focus_motion = 0, pickup_moved = 0;
+            unsigned strip_expired = 0, focus_motion = 0, pickup_moved = 0, scope_motion = 0;
 #ifdef ELITE_DRUMS808
             focus_motion = focus_animation_due(&next, shown.view_frames);
+            /* The play page's waveform moves on its own: redraw only its plot when nothing covers it. */
+            scope_motion = next.page == PAGE_TONE && shown.page == PAGE_TONE && !next.key_transpose_armed && !next.perform_view &&
+                !audio_fault && !safe_mode && !view_globe_map_visible(&next) &&
+                !(next.strip_knob && (uint32_t)(next.view_frames - next.strip_frame) < CONTROL_FOCUS_FRAMES);
             if (next.page == PAGE_MANUAL || next.page == PAGE_FILTER_ENV || next.page == PAGE_MIX)
                 for (unsigned f = 0; f < 4; f++)
                     pickup_moved |= !(fader_caught & (1u << f)) &&
@@ -1331,16 +1589,20 @@ static void main_loop(void)
                                playing_note != last_note || fader_caught != shown_fader_caught || audio_fault != last_fault;
             unsigned beat = panel_beat(&next);
             unsigned head_changed = head != last_step, beat_changed = beat != last_beat;
-            if (changed || head_changed || beat_changed || focus_motion) {
+            if (changed || head_changed || beat_changed || focus_motion || scope_motion) {
                 ui_time = fm1_ms;
                 last_step = (uint8_t)head;
                 last_beat = beat;
 #ifdef ELITE_DRUMS808
                 unsigned bar_only = next.page == PAGE_CONDUCTOR && !next.draft_view &&
                     !next.conductor_seq_pending && !next.drums_repeat && !next.key_transpose_armed;
-                if (!changed && !redraw_view && focus_motion) {
+                if (!changed && !redraw_view && scope_motion && !focus_motion && !head_changed && !beat_changed) {
+                    view_tel_play_plot(view_frame, &shown, playing_note);
+                    view_dillo_wallpaper(view_frame, view_livery(&shown), shown.main_notice == 3);
+                    next_strip = VIEW_TEL_PLOT_Y / VIEW_STRIP * VIEW_STRIP;
+                } else if (!changed && !redraw_view && focus_motion) {
                     view_focus(view_frame, &next);
-                    view_dillo_wallpaper(view_frame, view_livery(&next));
+                    view_dillo_wallpaper(view_frame, view_livery(&next), next.main_notice == 3);
                     if (beat_changed) view_header_motion(view_frame, &next, beat);
                     next_strip = beat_changed ? 0 : FOCUS_Y / VIEW_STRIP * VIEW_STRIP;
                 } else if (!changed && !redraw_view && !audio_fault && !safe_mode && (!head_changed || bar_only)) {

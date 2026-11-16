@@ -209,6 +209,14 @@ static void view_conductor_mix(uint16_t *pixels, const struct panel *panel)
     }
     int x = view_picnic(pixels, 8, 176 - 2, "MAIN", &picnic_S, BAND_MUTED) + 6;
     view_small_num(pixels, x, 174, panel->sound.master, 3, CHROME_CREAM);
+#ifdef ELITE_PERCUSSION_727
+    if (panel->layer_available) {
+        /* Always on show: which 727 layer plays over the song (K4 turns it). */
+        x = view_picnic(pixels, x + 28, 176 - 2, "727", &picnic_S, BAND_MUTED) + 6;
+        view_small(pixels, x, 174, panel->band_layer && !panel->drums_b.muted ?
+                   layer_rhythm_names[panel->band_layer - 1u] : "OFF  K4", panel->band_layer ? CORAL : CHROME_CREAM);
+    }
+#endif
 }
 
 static void view_conductor_drafts(uint16_t *pixels, const struct panel *panel)
@@ -352,6 +360,10 @@ static struct strip_cell conductor_home_control(const struct panel *panel, unsig
         [MIX_808] = ELITE_DRUM_PARTS > 1 ? "DR A" : "808", [MIX_808_B] = "DR B", [MIX_DILLO] = "303", [MIX_TELEGRAM] = "101"};
     if (knob < BAND_LANES)
         return strip_set(levels[conductor_lane_order[knob]], conductor_level(panel, conductor_lane_order[knob]), 0, 127);
+#ifdef ELITE_PERCUSSION_727
+    if (knob == 3 && panel->layer_available)
+        return strip_set("727", panel->band_layer * 127u / LAYER_RHYTHM_COUNT, 0, 127);
+#endif
     if (knob < 4) return (struct strip_cell){0, 0};
     if (knob == 4)
         return panel->sound.clock.source == TG_CLOCK_USB ? (struct strip_cell){0, 0} :
@@ -411,11 +423,17 @@ static void view_conductor_hints(uint16_t *pixels, const struct panel *panel, co
         view_keycap(pixels, x, "KEY", "TRANSP", liv);
         break;
     default:
-        x = view_keycap(pixels, x, "SEQ", "EDIT", liv);
-        x = view_keycap(pixels, x, "FX", "MIX", liv);
+        /* Most needed first: whatever does not fit is left off whole. */
+#ifdef ELITE_BAND_PRESETS
+        x = view_keycap(pixels, x, "PATCH", "SONGS", liv);
+        if (panel->band_last) x = view_keycap(pixels, x, "< >", "PART", liv);
+#else
         x = view_keycap(pixels, x, "PATCH", "SND", liv);
-        if (ELITE_DRUM_PARTS == 1) view_keycap(pixels, x, "BT", "PICK", liv);
-        else view_keycap(pixels, x, "REC", "SAVE", liv);
+#endif
+        x = view_keycap(pixels, x, "FX", "MIX", liv);
+        if (ELITE_DRUM_PARTS == 1) x = view_keycap(pixels, x, "BT", "PICK", liv);
+        else x = view_keycap(pixels, x, "REC", "SAVE", liv);
+        view_keycap(pixels, x, "SEQ", "EDIT", liv);
         break;
     }
 }
@@ -459,7 +477,45 @@ static void view_conductor(uint16_t *pixels, const struct panel *panel, unsigned
 #endif
     const char *slots = panel->band_bottom ? (panel->band_bank < 2 ? "SLOTS 1-8" : "SLOTS 9-16") :
                         banks[panel->band_bank % BAND_BANKS];
+#ifdef ELITE_BAND_PRESETS
+    if (panel->band_last) {
+        /* The song the band is playing, and which of its parts: the arrows step them. */
+        unsigned at = panel->band_last - 1u, page = band_page_of(at);
+        const struct band_preset_group *group = &factory_band_groups[band_page_group(page)];
+        char where[12];
+        unsigned part = at - group->start + 1u, n = 0;
+        if (part >= 10u) where[n++] = (char)('0' + part / 10u);
+        where[n++] = (char)('0' + part % 10u);
+        where[n++] = '/';
+        if (group->count >= 10u) where[n++] = (char)('0' + group->count / 10u % 10u);
+        where[n++] = (char)('0' + group->count % 10u);
+        where[n] = 0;
+        int x = view_small(pixels, 8, 169, where, CORAL) + 4;
+        char title[TG_NAME_BYTES + 4];
+        band_title(page, title);
+        unsigned len = 0;
+        while (title[len]) len++;
+        while (len && x + view_small_width(title) > 114) title[--len] = 0;
+        view_small(pixels, x, 169, title, CHROME_CREAM);
+        slots = 0;
+    }
+    if (slots)
+#endif
     view_small(pixels, 8, 169, slots, DIM);
+#ifdef ELITE_PERCUSSION_727
+    if (panel->layer_available && !hot) {
+        /* Always on show: the 727 layer over the song, and the knob that turns it. */
+        int x = view_small(pixels, 119, 169, "727", CORAL) + 4;
+        view_small(pixels, x, 169, panel->band_layer && !panel->drums_b.muted ?
+                   layer_rhythm_names[panel->band_layer - 1u] : "OFF  K4 TURNS", CHROME_CREAM);
+    }
+#endif
+#ifdef ELITE_PERCUSSION_727
+    if (hot == 4 && panel->layer_available) {
+        int x = view_small(pixels, 119, 169, "727", CHROME_CREAM) + 4;
+        view_small(pixels, x, 169, panel->band_layer ? layer_rhythm_names[panel->band_layer - 1u] : "OFF", CORAL);
+    } else
+#endif
     if (hot && (hot <= BAND_LANES || hot > 4)) {
         /* The knob being turned, named in full with its value. */
         const char *label;

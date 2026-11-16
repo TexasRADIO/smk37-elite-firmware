@@ -67,11 +67,20 @@ typedef struct {
     uint8_t rhythm_cues, late_usb_step; /* Lateness since first crossed USB bar, saturated. */
     uint8_t kit_changes; /* Per callback. Bit 0 is A, bit 1 is B. */
     uint8_t drums_b_update; /* Latest publication still needs B's renderer. */
+#ifdef ELITE_PERCUSSION_727
+    /* Load shedding: the 727 renders last and only when this returns nonzero (NULL: always). A skipped
+     * block ends the layer's sounding hits instead of letting the callback miss its deadline. */
+    unsigned (*drums_b_fits)(void);
+    uint32_t drums_b_shed; /* blocks the 727 gave way */
+#endif
 #ifdef ELITE_RENDER_PROFILE
     uint32_t layer_ticks[MIX_AUDIO_LANES];
 #endif
 } conductor_launch;
 
+/* In the Band, MAIN (controls.master) is the whole mix's level, applied by the mixer: 64 is unity, 127
+ * about +6 dB. Telegram's engine runs at the level MAIN 64 gave it alone. */
+enum { CONDUCTOR_TELEGRAM_LEVEL = 64 };
 void conductor_init(conductor_launch *);
 #ifdef ELITE_PERCUSSION_727
 /* Configure the B renderer while stopped. The bank must outlive playback. */
