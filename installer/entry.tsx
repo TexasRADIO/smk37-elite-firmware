@@ -1,0 +1,1 @@
+import React from 'react';import {createRoot} from 'react-dom/client';import Installer from './EliteInstaller';createRoot(document.getElementById('app')).render(React.createElement(Installer));

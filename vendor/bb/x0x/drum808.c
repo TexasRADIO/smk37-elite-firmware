@@ -2037,45 +2037,62 @@ static inline uint32_t bb_bank_delta(const d8_bank_t *bank, int oscillator, floa
     return bank->inc[oscillator] + (uint32_t)(int32_t)(p + (p >= 0.0f ? 0.5f : -0.5f));
 }
 
+/* The six oscillator outputs are exact squares between their BLEP edges.
+ * Advance phase analytically across that interval. Wraps and the shared drift
+ * clock are still serviced in sample order, including simultaneous wraps. */
+typedef struct {
+    uint32_t delta[6];
+    unsigned last[6], due[6], next, frame;
+    float inc[6], level[6], bus, pair;
+} bb_bank_span;
+
 static inline __attribute__((always_inline))
-float bb_bank_prepared_tick(d8_bank_t *b, const float inc[6], uint32_t delta[6], int need_bus)
+void bb_bank_event(d8_bank_t *b, bb_bank_span *span, int drift)
 {
-    float sum = 0.0f;
-    if (--b->drift_cnt <= 0) {
+    unsigned frame = span->frame;
+    if (drift) {
         b->drift_cnt = 256;
         for (int i = 0; i < 6; i++) {
             b->drift[i] += 2.5e-4f * rng_frand2(&b->rng);
             b->drift[i] *= 0.98f;
-            delta[i] = bb_bank_delta(b, i, inc[i]);
         }
     }
+    span->next = UINT32_MAX;
+    float sum = 0.0f;
     for (int i = 0; i < 6; i++) {
-        uint32_t dt = delta[i], old = b->ph[i];
-        b->ph[i] = old + dt;
-        if (b->ph[i] < old || (b->pend_wrap & (1u << i))) {
-            b->pend_wrap &= (uint8_t)~(1u << i);
-            b->jm1[i] = 0.0052f * rng_frand2(&b->rng);
-            delta[i] = bb_bank_delta(b, i, inc[i]);
-        }
-        if (need_bus) {
-            uint32_t phase = b->ph[i], fall = phase - BANK_DUTY;
-            /* Tuning, drift and jitter keep 0 < dt < 2^31. Shift each
-             * wrapped edge window to zero so one comparison tests both sides. */
-            uint32_t edge_offset = dt - 1u, edge_width = dt + edge_offset;
-            int rise_edge = phase + edge_offset < edge_width;
-            int fall_edge = fall + edge_offset < edge_width;
-            if (!rise_edge && !fall_edge) {
-                /* Optimist's edge-free path. The weighted square is exact. */
-                sum += phase < BANK_DUTY ? 2.5f : -2.5f;
-            } else {
-                float v = phase < BANK_DUTY ? 1.0f : -1.0f;
+        if (drift || frame >= span->due[i]) {
+            uint32_t dt = span->delta[i];
+            uint32_t old = b->ph[i] + (frame - 1u - span->last[i]) * dt;
+            if (drift) dt = span->delta[i] = bb_bank_delta(b, i, span->inc[i]);
+            uint32_t phase = old + dt;
+            b->ph[i] = phase;
+            span->last[i] = frame;
+            unsigned wrap = phase < old || (b->pend_wrap & (1u << i));
+            if (wrap) {
+                b->pend_wrap &= (uint8_t)~(1u << i);
+                b->jm1[i] = 0.0052f * rng_frand2(&b->rng);
+                span->delta[i] = bb_bank_delta(b, i, span->inc[i]);
+            }
+            float v = phase < BANK_DUTY ? 1.0f : -1.0f;
+            uint32_t fall = phase - BANK_DUTY, offset = dt - 1u, width = dt + offset;
+            int rise_edge = phase + offset < width, fall_edge = fall + offset < width;
+            unsigned interval = 1;
+            if (rise_edge || fall_edge) {
                 if (rise_edge) v += blep_fix(phase, dt);
                 if (fall_edge) v -= blep_fix(fall, dt);
-                sum += v * 2.5f;
+            } else if (!wrap) {
+                uint32_t distance = phase < BANK_DUTY ? BANK_DUTY - phase : 0u - phase;
+                interval = distance / dt;
             }
+            span->level[i] = v * 2.5f;
+            span->due[i] = frame + interval;
         }
+        if (span->due[i] < span->next) span->next = span->due[i];
+        sum += span->level[i];
     }
-    return sum * (1.0f / 21.0f);
+    span->bus = sum * (1.0f / 21.0f);
+    span->pair = ((b->ph[4] < BANK_DUTY ? 2.5f : -2.5f) +
+                  (b->ph[5] < BANK_DUTY ? 2.5f : -2.5f)) * 0.5f;
 }
 /* SPDX-License-Identifier: GPL-3.0-only
  * Fixed dispatch derived from the installed prepared-bank/context renderer.
@@ -2103,8 +2120,8 @@ int bb_render_span(drum808_t *d, float *dry, float *rev, float *dly,
         int bypass, type;
     } mix[L_NUM];
     unsigned active=0,fast=0;
-    float increments[6];
-    uint32_t delta[6];
+    bb_bank_span bank_span;
+    bank_span.frame = bank_span.next = 0;
     const unsigned metal_bus = (1u << L_CH) | (1u << L_OH) | (1u << L_CY);
     const unsigned cowbell = 1u << L_CB;
     const int with_sends = mode == BB_DRUM_SENDS, with_q23 = mode == BB_DRUM_Q23;
@@ -2130,18 +2147,9 @@ int bb_render_span(drum808_t *d, float *dry, float *rev, float *dly,
     }
     if (active & (metal_bus | cowbell))
         for (i = 0; i < 6; i++) {
-            increments[i] = (float)d->bank.inc[i];
-            delta[i] = bb_bank_delta(&d->bank, i, increments[i]);
-        }
-    for(i=0;i<n && active;i++) {
-        float bus=0,pair=0;
-        float dry_sample = with_q23 ? 0.0f : dry[i];
-        if (active & (metal_bus | cowbell)) {
-            d8_bank_t *b = &d->bank;
-            if (active & metal_bus) bus = bb_bank_prepared_tick(b, increments, delta, 1);
-            else bb_bank_prepared_tick(b, increments, delta, 0);
-            if (active & cowbell)
-                pair=((b->ph[4]<BANK_DUTY?2.5f:-2.5f)+(b->ph[5]<BANK_DUTY?2.5f:-2.5f))*0.5f;
+            bank_span.due[i] = bank_span.last[i] = 0;
+            bank_span.inc[i] = (float)d->bank.inc[i];
+            bank_span.delta[i] = bb_bank_delta(&d->bank, i, bank_span.inc[i]);
         }
 #define BB_TARGET_LANE(index, expression) do { \
         if(active&(1u<<(index))) { \
@@ -2182,15 +2190,42 @@ int bb_render_span(drum808_t *d, float *dry, float *rev, float *dly,
 #else
 #define BB_TARGET_TAIL() ((void)0)
 #endif
-        BB_TARGET_LANE(L_BD,bd_tick(&d->bd));
-        BB_TARGET_LANE(L_SD,sd_tick(&d->sd));
-        BB_TARGET_LANE(L_T0,tom_tick(&d->tom[0]));
-        BB_TARGET_LANE(L_T1,tom_tick(&d->tom[1]));
-        BB_TARGET_LANE(L_T2,tom_tick(&d->tom[2]));
-        BB_TARGET_LANE(L_RS,rs_tick(&d->rs));
-        BB_TARGET_LANE(L_CL,cl_tick(&d->cl));
-        BB_TARGET_LANE(L_MA,ma_tick(&d->ma));
-        BB_TARGET_LANE(L_CP,cp_tick(&d->cp));
+    /* Independent drum voices can each render a contiguous span. Only
+     * cowbell, hats and cymbal share oscillator state and run in frame order.
+     * Accumulate in the same lane order at every frame. */
+    float partial[128];
+    float *sum = with_q23 ? partial : dry;
+    if (with_q23) for (i = 0; i < n; i++) sum[i] = 0.0f;
+#define BB_DRY_LANE(index, expression) do { \
+        if (active & (1u << (index))) { \
+            for (i = 0; i < n && (active & (1u << (index))); i++) { \
+                float dry_sample = sum[i]; \
+                BB_TARGET_LANE(index, expression); \
+                sum[i] = dry_sample; \
+            } \
+        } \
+    } while (0)
+    BB_DRY_LANE(L_BD,bd_tick(&d->bd));
+    BB_DRY_LANE(L_SD,sd_tick(&d->sd));
+    BB_DRY_LANE(L_T0,tom_tick(&d->tom[0]));
+    BB_DRY_LANE(L_T1,tom_tick(&d->tom[1]));
+    BB_DRY_LANE(L_T2,tom_tick(&d->tom[2]));
+    BB_DRY_LANE(L_RS,rs_tick(&d->rs));
+    BB_DRY_LANE(L_CL,cl_tick(&d->cl));
+    BB_DRY_LANE(L_MA,ma_tick(&d->ma));
+    BB_DRY_LANE(L_CP,cp_tick(&d->cp));
+#undef BB_DRY_LANE
+    for (i = 0; i < n; i++) {
+        float bus=0,pair=0;
+        float dry_sample = sum[i];
+        if (active & (metal_bus | cowbell)) {
+            ++bank_span.frame;
+            int drift = --d->bank.drift_cnt <= 0;
+            if (drift || bank_span.frame >= bank_span.next)
+                bb_bank_event(&d->bank, &bank_span, drift);
+            bus = bank_span.bus;
+            pair = bank_span.pair;
+        }
         BB_TARGET_LANE(L_CB,cb_tick(&d->cb,pair));
         BB_TARGET_LANE(L_CH,hat_tick(&d->ch,bus));
         BB_TARGET_LANE(L_OH,hat_tick(&d->oh,bus));
@@ -2202,6 +2237,9 @@ int bb_render_span(drum808_t *d, float *dry, float *rev, float *dly,
 #undef BB_TARGET_TAIL
 #undef BB_TARGET_LANE
     }
+    if (bank_span.frame)
+        for (int osc = 0; osc < 6; osc++)
+            d->bank.ph[osc] += (bank_span.frame - bank_span.last[osc]) * bank_span.delta[osc];
     if (with_q23)
         for (; i < n; i++) pcm[i] = bb_drum_clip_q23(pcm[i]);
     return 0;
@@ -2219,7 +2257,13 @@ void bb_drum808_render_dry(drum808_t *d, float *dry, int n)
 
 int bb_drum808_render_q23(drum808_t *d, int32_t *pcm, int n, float gain)
 {
-    return bb_render_span(d, NULL, NULL, NULL, pcm, gain, n, BB_DRUM_Q23);
+    while (n > 0) {
+        int count = n < 128 ? n : 128;
+        if (bb_render_span(d, NULL, NULL, NULL, pcm, gain, count, BB_DRUM_Q23)) return -1;
+        pcm += count;
+        n -= count;
+    }
+    return 0;
 }
 
 #ifdef ELITE_808_RAM

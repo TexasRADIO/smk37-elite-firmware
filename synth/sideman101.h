@@ -3,10 +3,10 @@
 #define SIDEMAN101_H
 #include <stdint.h>
 
-/* Sideman: the browser companion guide at thebigbeat.app/sideman follows the instrument through one
- * 19-byte SysEx state message, shared by every Big Beat firmware:
- *   F0 00 22 24 35 01 fw page bank mode knob bpm-hi bpm-lo instrument running section help fx_tab F7
- * Byte 6 names the firmware so the page loads the right guide; BB-37 is 03. Every field is 7-bit. */
+ 
+
+
+
 enum { TG_SIDEMAN_BYTES = 19, TG_SIDEMAN_PACKETS = 7, TG_SIDEMAN_FW_BB37 = 3, TG_SIDEMAN_NONE = 127 };
 
 typedef struct {

@@ -34,6 +34,26 @@ typedef struct {
     uint8_t step, head, running, started, blocked_key, live_tail, articulation;
 } dillo_layer;
 
+/* A Dillo tone as it is stored and exchanged: 12 bytes, little-endian words. The board's setup journal
+ * and the editor's audition both use these, so a sound that round-trips here is the stored sound. */
+enum { DILLO_TONE_BYTES = 12 };
+static inline void dillo_tone_pack(uint8_t out[DILLO_TONE_BYTES], const bb_dillo_patch *patch)
+{
+    out[0] = (uint8_t)patch->cutoff_hz; out[1] = (uint8_t)(patch->cutoff_hz >> 8);
+    out[2] = (uint8_t)patch->resonance_x100; out[3] = (uint8_t)(patch->resonance_x100 >> 8);
+    out[4] = patch->wave; out[5] = patch->envelope; out[6] = patch->decay; out[7] = patch->accent;
+    out[8] = patch->drive; out[9] = patch->slide_ms; out[10] = patch->attack_ms; out[11] = patch->tracking;
+}
+int dillo_patch_valid(const bb_dillo_patch *);
+static inline int dillo_tone_unpack(bb_dillo_patch *patch, const uint8_t in[DILLO_TONE_BYTES])
+{
+    patch->cutoff_hz = (uint16_t)(in[0] | in[1] << 8);
+    patch->resonance_x100 = (uint16_t)(in[2] | in[3] << 8);
+    patch->wave = in[4]; patch->envelope = in[5]; patch->decay = in[6]; patch->accent = in[7];
+    patch->drive = in[8]; patch->slide_ms = in[9]; patch->attack_ms = in[10]; patch->tracking = in[11];
+    return dillo_patch_valid(patch);
+}
+
 typedef struct { const char *name; dillo_sound sound; } dillo_named_sound;
 extern const dillo_named_sound dillo_expansion[DILLO_EXPANSION_SOUNDS];
 extern const dillo_named_sound dillo_classic[DILLO_CLASSIC_SOUNDS];

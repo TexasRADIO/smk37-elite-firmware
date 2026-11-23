@@ -3,14 +3,25 @@
 void tg_scope_write(tg_scope *s, const int32_t *stereo, unsigned frames)
 {
     unsigned head = s->head;
-    for (unsigned i = 0; i < frames; i++) {
-        int32_t v = stereo[2u * i] >> 8;
-        if (!s->half) { s->odd = v; s->half = 1; continue; }
-        s->half = 0;
-        v = (s->odd + v) / 2;
+    /* Capture pairs directly; a split host render may start or finish on
+     * a single sample. Keep the held sample identical across that split. */
+    if (frames && s->half) {
+        int32_t v = (s->odd + (stereo[0] >> 8)) / 2;
         s->ring[head] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
         head = (head + 1u) & (TG_SCOPE_RING - 1u);
+        stereo += 2;
+        frames--;
+        s->half = 0;
     }
+    while (frames >= 2) {
+        s->odd = stereo[0] >> 8;
+        int32_t v = (s->odd + (stereo[2] >> 8)) / 2;
+        s->ring[head] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+        head = (head + 1u) & (TG_SCOPE_RING - 1u);
+        stereo += 4;
+        frames -= 2;
+    }
+    if (frames) { s->odd = stereo[0] >> 8; s->half = 1; }
     s->head = (uint16_t)head;
 }
 

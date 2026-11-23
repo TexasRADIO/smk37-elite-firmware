@@ -15,6 +15,7 @@ enum { P727_STOCK, P727_LATIN, P727_KITS };
 /* Compás streams run at 44.1 kHz. Hanan bytes are unsigned PCM at 9804 Hz. */
 typedef struct { uint32_t offset, frames; } percussion_clip;
 typedef struct {
+    const struct percussion_attack_cache *attacks;
     const uint8_t *packed727;
     const uint8_t *hanan;
     const percussion_clip *clips;
@@ -30,6 +31,17 @@ typedef struct {
     uint16_t phase;
     uint8_t repeats, sound, velocity, source_phase;
 } percussion_voice;
+
+enum { P727_ATTACK_FRAMES = 448 };
+typedef struct percussion_attack_cache {
+    int16_t pcm[P727_BOMBO][P727_ATTACK_FRAMES];
+    percussion_voice after[P727_BOMBO];
+    uint16_t length[P727_BOMBO];
+} percussion_attack_cache;
+
+/* Build once in the foreground after verifying this bank. The renderer
+ * can resume the original lossless stream at any callback boundary. */
+void percussion_prepare_attacks(percussion_bank *bank, percussion_attack_cache *cache);
 
 typedef struct {
     percussion_voice voice[P727_TRACKS];

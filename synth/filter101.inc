@@ -70,17 +70,25 @@ static float filter_tick(float state[4], float input, float G, float k)
 {
     /* All stages share the cutoff. The final stage is G^4 * u + memory.
      * Solve the current-sample feedback before advancing any integrator. */
-    float G2 = G * G;
-    float G4 = G2 * G2;
-    float memory = (1.0f - G) * (((state[0] * G + state[1]) * G + state[2]) * G + state[3]);
-    float drive = memory + G4 * input;
-    float y = drive / (1.0f + G4 * k);
-    float slope;
-    for (unsigned i = 0; i < 2; i++) {
+    float signal = input;
+    if (k != 0.0f) {
+        float G2 = G * G;
+        float G4 = G2 * G2;
+        float memory = (1.0f - G) * (((state[0] * G + state[1]) * G + state[2]) * G + state[3]);
+        float drive = memory + G4 * input;
+        float loop_gain = G4 * k;
+        float y = drive / (1.0f + loop_gain);
+        float slope;
         float feedback = filter_feedback(y, &slope);
-        y -= (y + G4 * k * feedback - drive) / (1.0f + G4 * k * slope);
+        for (unsigned i = 0; i < 2; i++) {
+            float next = y - (y + loop_gain * feedback - drive) / (1.0f + loop_gain * slope);
+            /* An unchanged float is a fixed point of this iteration. */
+            if (next == y) break;
+            y = next;
+            feedback = filter_feedback(y, &slope);
+        }
+        signal -= k * feedback;
     }
-    float signal = input - k * filter_feedback(y, &slope);
     for (unsigned i = 0; i < 4; i++) {
         float delta = (signal - state[i]) * G;
         signal = state[i] + delta;

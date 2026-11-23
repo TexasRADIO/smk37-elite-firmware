@@ -21,3 +21,6 @@ GPL-3.0-only, and Hanan Cumbia recordings by Oficina de Sonido under CC BY-SA
 
 M-VAVE, SMK-37, Roland, SH-101, TB-303 and TR-808 are trademarks of their
 respective owners. BB-37 is an independent project.
+
+Dillo phrases adapted from J. McConaghy / Acid-Tabs.com (https://acid-tabs.com) are renamed, revoiced and retimed. CC BY-SA 4.0 applies (https://creativecommons.org/licenses/by-sa/4.0/). Acid Voice charts (https://acidvoice.com) are adapted under a separate project licence. Picnic firmware glyphs are by Taylor Rushing.
+The installer includes React, React DOM and Scheduler under the MIT licence. See Source.zip for their notices.

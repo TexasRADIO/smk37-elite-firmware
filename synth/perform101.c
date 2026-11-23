@@ -84,14 +84,27 @@ void tg_perform_render(tg_perform *p, int32_t *st, unsigned frames, unsigned tem
     unsigned filtering[2] = {p->filter_on[0] || p->cutoff[0] != LPF_OPEN, p->filter_on[1] || p->cutoff[1] != HPF_OPEN};
     if (p->mode == TG_PF_NONE && !p->wet && !filtering[0] && !filtering[1]) {
         /* Idle: only record. */
-        for (unsigned i = 0; i < frames; i++) {
-            int32_t m = (st[2u * i] + st[2u * i + 1u]) / 2 >> 8;
-            if (!p->half) { p->odd = m; p->half = 1; continue; }
-            p->half = 0;
+        unsigned head = p->head;
+        if (p->half && frames) {
+            int32_t m = (st[0] + st[1]) / 2 >> 8;
             int32_t v = (p->odd + m) / 2;
-            p->ring[p->head] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
-            p->head = (uint16_t)((p->head + 1u) & (TG_PERF_RING - 1u));
+            p->ring[head] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+            head = (head + 1u) & (TG_PERF_RING - 1u);
+            p->half = 0;
+            st += 2;
+            frames--;
         }
+        while (frames >= 2) {
+            p->odd = (st[0] + st[1]) / 2 >> 8;
+            int32_t m = (st[2] + st[3]) / 2 >> 8;
+            int32_t v = (p->odd + m) / 2;
+            p->ring[head] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+            head = (head + 1u) & (TG_PERF_RING - 1u);
+            st += 4;
+            frames -= 2;
+        }
+        if (frames) { p->odd = (st[0] + st[1]) / 2 >> 8; p->half = 1; }
+        p->head = (uint16_t)head;
         return;
     }
     float a1[2] = {0}, a2[2] = {0}, a3[2] = {0};

@@ -21,6 +21,10 @@ void conductor_init(conductor_launch *launch)
     launch->rhythm_cues = launch->late_usb_step = 0;
     launch->kit_changes = 0;
     launch->drums_b_update = 0;
+#ifdef ELITE_PERCUSSION_727
+    launch->drums_b_fits = NULL;
+    launch->drums_b_shed = 0;
+#endif
     dillo_layer_init(&launch->dillo);
     drum_layer_init(&launch->drums);
     drum_layer_init(&launch->drums_b);
@@ -237,6 +241,17 @@ int conductor_drums_b_active(const conductor_launch *launch, const conductor_pat
            drum_layer_active(&launch->drums_b);
 }
 
+#ifdef ELITE_PERCUSSION_727
+static __attribute__((noinline)) int shed_percussion(conductor_launch *launch)
+{
+    if (!launch->drums_b.percussion.bank || !launch->drums_b_fits || launch->drums_b_fits()) return 0;
+    launch->drums_b.percussion.active = 0;
+    launch->drums_b.step = launch->drums.step;
+    launch->drums_b_shed++;
+    return 1;
+}
+#endif
+
 static int mix_layers(conductor_launch *launch, int32_t *bass, int32_t *drums, int32_t *drums_b, unsigned frames,
                       const tg_controls *controls, unsigned edge)
 {
@@ -258,12 +273,7 @@ static int mix_layers(conductor_launch *launch, int32_t *bass, int32_t *drums, i
     RENDER_ACCUMULATE(MIX_808, stamp);
     if (drums_b && !result) {
 #ifdef ELITE_PERCUSSION_727
-        if (launch->drums_b.percussion.bank && launch->drums_b_fits && !launch->drums_b_fits()) {
-            launch->drums_b.percussion.active = 0;
-            launch->drums_b.step = launch->drums.step; /* where a rendered B would have ended */
-            launch->drums_b_shed++;
-            return 0;
-        }
+        if (shed_percussion(launch)) return 0;
 #endif
         launch->drums_b.step = step;
         stamp = RENDER_STAMP();
@@ -376,7 +386,15 @@ static int mix_usb(conductor_launch *launch, int32_t *bass, int32_t *drums, int3
                             active->dillo_on ? &active->dillo : NULL, dillo_next, tick ? grid.events : 0,
                             dillo_detach, period, elapsed)) return -1;
     RENDER_ACCUMULATE(MIX_DILLO, stamp);
-    if (drums_b) {
+    stamp = RENDER_STAMP();
+    int result = drum_layer_mix_usb(&launch->drums, drums, frames, controls,
+                                    active->drums_on ? &active->drums : NULL, grid.next, tick,
+                                    roll, drums_detach);
+    RENDER_ACCUMULATE(MIX_808, stamp);
+    if (drums_b && !result) {
+#ifdef ELITE_PERCUSSION_727
+        if (shed_percussion(launch)) return 0;
+#endif
         unsigned b_roll = usb_roll_edge(roll_pulse, roll_pulses, &requested->drums_b.roll);
         stamp = RENDER_STAMP();
         if (drum_layer_mix_usb(&launch->drums_b, drums_b, frames, controls,
@@ -384,11 +402,6 @@ static int mix_usb(conductor_launch *launch, int32_t *bass, int32_t *drums, int3
                               grid.next, tick, b_roll, drums_detach)) return -1;
         RENDER_ACCUMULATE(MIX_808_B, stamp);
     }
-    stamp = RENDER_STAMP();
-    int result = drum_layer_mix_usb(&launch->drums, drums, frames, controls,
-                                    active->drums_on ? &active->drums : NULL, grid.next, tick,
-                                    roll, drums_detach);
-    RENDER_ACCUMULATE(MIX_808, stamp);
     return result;
 }
 

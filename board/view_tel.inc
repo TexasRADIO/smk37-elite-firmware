@@ -6,6 +6,8 @@ static const char *const control_label[CTRL_COUNT] = {
 };
 
 static const char *const pwm_source_name[TG_PWM_SOURCE_COUNT] = {"MAN", "LFO", "ENV", "S&H", "SUB"};
+static const char *const view_root_names[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+static const char *const view_scale_names[] = {"OFF", "MAJOR", "MINOR", "DORIAN", "LYDIAN", "MAJ PENT", "MIN PENT"};
 
 static void view_octave(uint16_t *pixels,int x,int y,unsigned value,uint16_t color)
 {
@@ -366,7 +368,13 @@ static void view_perform_map(uint16_t *pixels, const struct panel *panel)
     static const char *const white_label[7] = {"1/8", "1/16", "1/32", "REV", "TAPE", "LPF", "HPF"};
     static const uint8_t white_fx[7] = {TG_PF_R8, TG_PF_R16, TG_PF_R32, TG_PF_REV, TG_PF_TAPE, TG_PF_LPF, TG_PF_HPF};
     static const uint8_t black_after[4] = {0, 1, 3, 4}; /* C#, D#, F#, G#: after these white keys */
-    static const char *const black_label[4] = {"TEL", "DIL", "808A", "808B"};
+    static const char *const black_label[4] = {"TEL", "DIL", "808",
+#ifdef ELITE_PERCUSSION_727
+        "727"
+#else
+        "808B"
+#endif
+    };
     view_rect(pixels, 0, 18, VIEW_W, 166, TEL_STAGE);
     view_picnic(pixels, 8, 21, "PERFORM", &picnic_M, INK);
     view_small(pixels, VIEW_W - 8 - view_small_width("HOLD FX + KEYS"), 30, "HOLD FX + KEYS", DIM);
@@ -384,7 +392,14 @@ static void view_perform_map(uint16_t *pixels, const struct panel *panel)
         view_small(pixels, x0 + w * (int)k + (w - 2 - view_small_width(label)) / 2, top + h - 14, label,
                    held ? INK : TEL_STAGE);
     }
-    for (unsigned b = 0; b < 4; b++) {
+    unsigned parts = 4;
+#ifdef ELITE_SINGLE_808
+    parts = 3;
+#ifdef ELITE_PERCUSSION_727
+    if (panel->layer_available) parts = 4;
+#endif
+#endif
+    for (unsigned b = 0; b < parts; b++) {
         int x = x0 + w * (black_after[b] + 1) - 11;
         unsigned muted = panel->perform_mutes & (1u << b);
         view_rect(pixels, x, top, 18, 52, muted ? CORAL : TEL_PLOT);
@@ -422,6 +437,8 @@ static void view_tel_play_plot(uint16_t *pixels, const struct panel *panel, unsi
     } else view_tel_envelope(pixels, patch, 0, 12, 98, 216, 40);
 }
 
+static const char *const tg_bank_names[TG_PRESET_BANKS] = {"ESSENTIALS", "BASS", "LEAD", "MOTION", "1982 FACTORY", "1982 FACTORY", "1982+PATCHWORK"};
+
 static void view_tel_play_stage(uint16_t *pixels, const struct panel *panel, unsigned note)
 {
     const char *name = panel_sound_name(panel);
@@ -444,9 +461,17 @@ static void view_tel_play_stage(uint16_t *pixels, const struct panel *panel, uns
     } else {
         unsigned bank = panel->knob_bank;
         unsigned custom = memcmp(panel->knob_map[bank], tg_default_knob_map[bank], sizeof panel->knob_map[bank]) != 0;
-        view_picnic(pixels, 8, 68, custom ? "USER KNOBS" : bank ? "MOD KNOBS" : "TONE KNOBS", &picnic_M, DIM);
+        /* Home names the 101 sound bank the pads and arrows are on (Telegram 101 first). */
+        view_picnic(pixels, 8, 68, custom ? "USER KNOBS" : panel->user_sound || panel->imported_sound || panel->scene_sound ?
+                    (bank ? "MOD KNOBS" : "TONE KNOBS") : tg_bank_names[panel->preset / TG_PADS % TG_PRESET_BANKS], &picnic_M, DIM);
     }
+    /* Which of the two knob pages the deck shows (KNOB BANK turns it). */
+    for (unsigned d = 0; d < 2; d++) view_rect(pixels, 8 + 12 * (int)d, 175, 9, 3, d == panel->knob_bank ? CHROME_BLUE : DIM);
+#ifdef ELITE_DRUMS808
+    const char *chip = panel->conductor_dillo_keys ? "KEYS DILLO" : panel->hold ? "HOLD" : panel->repeat_on ? "REPEAT" : NULL;
+#else
     const char *chip = panel->hold ? "HOLD" : panel->repeat_on ? "REPEAT" : NULL;
+#endif
     char key[8];
     if (panel->key_transpose) {
         int shift = panel->key_transpose;
@@ -517,6 +542,8 @@ static void view_tel_shape_stage(uint16_t *pixels, const struct panel *panel)
         tag = waves[patch->lfo_wave];
     }
     if (tag) view_tag_left(pixels, VIEW_W - 8, 20, tag, CHROME_BLUE, TEL_STAGE);
+    /* Where you are in Shape: one mark for each of the 101's four panel sections. */
+    for (unsigned d = 0; d < 4; d++) view_rect(pixels, 8 + 12 * (int)d, 41, 9, 3, d == bank ? CHROME_BLUE : DIM);
     view_rect(pixels, 8, 46, 224, 50, TEL_PLOT);
     if (filter_env || bank == 2) view_tel_envelope(pixels, patch, filter_env, 12, 50, 216, 42);
     else if (bank == 0) view_tel_oscillator(pixels, patch, 12, 50, 216, 42);
@@ -712,8 +739,8 @@ static void view_tel_fx_stage(uint16_t *pixels, const struct panel *panel)
 
 static void view_tel_global_stage(uint16_t *pixels, const struct panel *panel)
 {
-    static const char *const roots[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-    static const char *const scales[] = {"OFF", "MAJOR", "MINOR", "DORIAN", "LYDIAN", "MAJOR PENT", "MINOR PENT"};
+    const char *const *roots = view_root_names;
+    const char *const *scales = view_scale_names;
     static const char *const pedals[] = {"OFF", "LOW", "HIGH"};
     static const uint16_t sharp = (1u << 1) | (1u << 3) | (1u << 6) | (1u << 8) | (1u << 10);
     view_picnic(pixels, 8, 23, "KEY SCALE", &picnic_M, INK);
@@ -868,7 +895,7 @@ static void view_tel_factory_chart(uint16_t *pixels, unsigned preset, int x, int
 
 static void view_tel_library_stage(uint16_t *pixels, const struct panel *panel)
 {
-    static const char *const factory[] = {"ESSENTIALS", "BASS", "LEAD", "MOTION", "1982 FACTORY", "1982 FACTORY", "1982+PATCHWORK"};
+    const char *const *factory = tg_bank_names;
     unsigned imported = panel->library_kind == LIB_IMPORTED;
     const char *title = panel->library_kind == LIB_FACTORY ? factory[panel->preset_bank] :
                         panel->library_kind == LIB_SOUNDS ? "YOUR SOUNDS" : imported ?
@@ -989,8 +1016,10 @@ static void view_telegram(uint16_t *pixels, const struct panel *panel, unsigned 
                           const char *const *rate_name, const char *step_help)
 {
     static const char *const page_name[] = {"PLAY", "SEQUENCE", "LIBRARY", "SHAPE", "ASSIGN", "FX", "GLOBAL", "VCF ENV", "ARP"};
-    static const char *const bank_name[] = {"ESSENTIALS", "BASS", "LEAD", "MOTION", "1982 FACTORY", "1982 FACTORY", "1982+PATCHWORK"};
+    const char *const *bank_name = tg_bank_names;
+#ifndef ELITE_DRUMS808
     static const char *const shape_name[] = {"SOURCE MIXER", "VCF", "ENVELOPE", "MODULATOR"};
+#endif
     static const char *const arp_name[] = {"ARP OFF", "ARP UP", "ARP DOWN", "ARP EXCL",
         "ARP INCL", "ARP RANDOM", "ARP ORDER", "ARP REPEAT"};
     const tg_controls *sound = &panel->sound;
@@ -1073,6 +1102,7 @@ static void view_telegram(uint16_t *pixels, const struct panel *panel, unsigned 
             view_num(pixels, 198, 31, (unsigned)(sound->transpose < 0 ? -sound->transpose : sound->transpose), 2, CORAL);
         }
     }
+#ifndef ELITE_DRUMS808 /* these pages always draw through view_tel_stage on the Elite */
     if (panel->page == PAGE_TONE) {
         view_short_text(pixels, 10, 51, panel_sound_name(panel), 17, INK);
         if (panel_sound_edited(panel)) view_text(pixels, 152, 51, "*", 1, CORAL);
@@ -1101,8 +1131,8 @@ static void view_telegram(uint16_t *pixels, const struct panel *panel, unsigned 
         else view_num(pixels, 180, 202, control_value(sound, CTRL_TEMPO), 3, INK);
         view_text(pixels, 207, 202, "BPM", 1, DIM);
     } else if (panel->page == PAGE_GLOBAL) {
-        static const char *const roots[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-        static const char *const scales[] = {"OFF", "MAJOR", "MINOR", "DORIAN", "LYDIAN", "MAJOR PENT", "MINOR PENT"};
+        const char *const *roots = view_root_names;
+        const char *const *scales = view_scale_names;
         static const char *const pedal[] = {"K7 PED OFF", "K7 PED LOW", "K7 PED HIGH"};
         view_title(pixels, 10, 56, "KEY SCALE", INK);
         view_text(pixels, 140, 57, pedal[panel->pedal_mode], 1, panel->pedal_down ? LIME : DIM);
@@ -1262,7 +1292,9 @@ static void view_telegram(uint16_t *pixels, const struct panel *panel, unsigned 
                              panel->library_dirty ? "LAYOUT NOT SAVED" :
                              panel->library_status == LIB_SAVED ? "LAYOUT SAVED" : "REC SAVES THIS PROFILE";
         view_text(pixels, 10, 205, status, 1, panel_layout_edited(panel) || panel->library_dirty ? CORAL : DIM);
-    } else {
+    } else
+#endif
+    {
         unsigned base = step_page_base(panel, head);
         unsigned length = tg_pattern_length(sound);
         unsigned patch = panel->page == PAGE_PATCH;

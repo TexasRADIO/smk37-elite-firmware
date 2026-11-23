@@ -48,8 +48,9 @@ void mix_frames(conductor_mix_state *state, int32_t *const input[], unsigned lan
              * the four round-toward-zero shifts, including zero gains. */
             int32_t sign = mono >> 31;
             int32_t stereo_bias = sign & 255;
-            /* Dillo sits 6 dB up on Telegram and the 808 kits 12 dB.
-             * Their sends rise with them. */
+             
+
+
             unsigned up = lane == MIX_TELEGRAM ? 0u : lane == MIX_DILLO ? 1u : 2u;
             int32_t lane_left = (mono * g[0] + (stereo_bias >> up)) >> (8 - up);
             int32_t lane_right = (mono * g[1] + (stereo_bias >> up)) >> (8 - up);

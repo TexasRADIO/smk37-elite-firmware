@@ -125,6 +125,7 @@ static void strip_cells(const struct panel *panel, struct strip_cell cell[8])
             for (unsigned k = 0; k < 8; k++)
                 cell[k] = layer_group_name[k] ? strip_set(layer_group_name[k], panel->layer_mix[k], 0, 127) :
                                                 (struct strip_cell){0, 0};
+            cell[6] = strip_set("RHY", panel->band_layer, 0, LAYER_RHYTHM_COUNT);
             return;
         }
         if (panel->rhythm_source == RHYTHM_BAND && panel->layer_available)
@@ -193,6 +194,9 @@ static void strip_cells(const struct panel *panel, struct strip_cell cell[8])
         return;
     }
     for (unsigned k = 0; k < 8; k++) cell[k] = strip_control(sound, panel->knob_map[panel->knob_bank][k]);
+    unsigned browse = telegram_browse_target(panel);
+    if (telegram_home_knob(panel, 6)) cell[6] = strip_set("SND", browse % TG_PADS, 0, TG_PADS - 1);
+    if (telegram_home_knob(panel, 7)) cell[7] = strip_set("BNK", browse / TG_PADS, 0, TG_PRESET_BANKS - 1);
     if (page == PAGE_STEPS) {
         cell[5] = strip_set("GATE", (int)tg_phrase_gate(sound), 5, 100);
         cell[6] = strip_set("LEN", (int)tg_pattern_length(sound), 1, TG_STEPS);
@@ -218,6 +222,9 @@ struct strip_hint { const char *key, *action; };
 static unsigned strip_hints(const struct panel *panel, unsigned held, struct strip_hint hint[3])
 {
     unsigned page = panel->page, n = 0;
+    unsigned destination = bt_destination(panel, 0);
+    const char *back = destination == PAGE_CONDUCTOR ? "BAND" :
+                       destination == PAGE_INSTRUMENTS ? "INSTRUMENTS" : "HOME";
 #define HINT(k, a) do { if (n < 3) hint[n++] = (struct strip_hint){k, a}; } while (0)
 #ifdef ELITE_SYNTH_PRESETS
     if (page == PAGE_SYNTH_PRESETS) {
@@ -230,7 +237,7 @@ static unsigned strip_hints(const struct panel *panel, unsigned held, struct str
             return n;
         }
 #endif
-        HINT("PAD", "LOAD"); HINT("PARA", "SOURCE"); HINT("PATCH", "BACK");
+        HINT("PAD", "LOAD"); HINT("PARA", "SOURCE"); HINT("BT", "BACK");
         return n;
     }
 #endif
@@ -262,18 +269,20 @@ static unsigned strip_hints(const struct panel *panel, unsigned held, struct str
     } else switch (page) {
     case PAGE_TONE:
         if (panel->repeat_edit) { HINT("PAD", "ROLL"); HINT("RATE", "DIV"); break; }
-        HINT("BT", ELITE_DRUM_PARTS == 1 ? "BAND" : "INSTRUMENTS");
-        HINT("PARA", "MUTE"); HINT("KNOB BANK", panel->knob_bank ? "TONE" : "MOD"); break;
+        if (telegram_home_knob(panel, 6)) HINT("K7", "SOUND");
+        if (telegram_home_knob(panel, 7)) HINT("K8", "BANK");
+        HINT("BT", back); break;
     case PAGE_MANUAL:
         HINT("< >", "SHAPE");
-        if (panel->fader_bank == 1) HINT("PARA", "FILT ENV");
+        if (panel->fader_bank == 0) HINT("PARA", "SUB");
+        else if (panel->fader_bank == 1) HINT("PARA", "FILT ENV");
         else if (panel->fader_bank == 2) HINT("PARA", "TRIG");
-        HINT("BT", "HOME"); break;
-    case PAGE_FILTER_ENV: HINT("PARA", "VCF"); HINT("BT", "HOME"); break;
+        HINT("BT", back); break;
+    case PAGE_FILTER_ENV: HINT("PARA", "VCF"); HINT("BT", back); break;
     case PAGE_STEPS: HINT("REC", panel->record ? "STOP" : "ENTER"); HINT("PLAY", "RUN"); HINT("< >", "PAGE"); break;
     case PAGE_ARP: HINT("CHORD", "LATCH"); HINT("ARP", "BACK"); break;
-    case PAGE_FX: HINT("FX", "BACK"); HINT("BT", "HOME"); break;
-    case PAGE_GLOBAL: HINT("GLOBE", "BACK"); HINT("BT", "HOME"); break;
+    case PAGE_FX: HINT("FX", "BACK"); HINT("BT", back); break;
+    case PAGE_GLOBAL: HINT("GLOBE", "BACK"); HINT("BT", back); break;
     case PAGE_ASSIGN: HINT("< >", "DEST"); HINT("REC", "SAVE"); HINT("BT", "DONE"); break;
     case PAGE_PATCH: HINT("PAD", "LOAD"); HINT("< >", "PAGE"); HINT("REC", "COPY"); break;
     case PAGE_DILLO_SOUND: HINT("< >", "SOUNDS"); HINT("PARA", panel->dillo_sound_page ? "TONE" : "MOD"); HINT("PATCH", panel->dillo_sound_home ? "HOME" : "STEPS"); break;
@@ -300,6 +309,11 @@ static unsigned strip_hints(const struct panel *panel, unsigned held, struct str
 #endif
         HINT("BT", "BACK"); break;
     case PAGE_DRUM_PRESETS:
+#ifdef ELITE_PERCUSSION_727
+        if (panel->rhythm_source == RHYTHM_LAYER) {
+            HINT("PAD", "CUE"); HINT("BT", library_active(panel) ? "BACK" : back); break;
+        }
+#endif
 #ifdef ELITE_BAND_PRESETS
         if (panel->rhythm_source == RHYTHM_BAND) {
             /* The arrows name where they go next: Songs, Machines, Eras. */
@@ -345,6 +359,16 @@ static void view_footer(uint16_t *pixels, const struct panel *panel)
             view_knob_cell(pixels, k, cell[k].label, cell[k].value, liv);
         }
     }
+#ifdef ELITE_DRUMS808
+    if (panel->motion_state == MOTION_PLAYING) { /* MOTION: a bar across the top of the knob whose movement is looping */
+        unsigned target = panel->motion_target;
+        for (unsigned k = 0; k < 8; k++) {
+            unsigned mine = performance_page(panel->page) && panel->page != PAGE_FX && cell[k].label &&
+                            panel->knob_map[panel->knob_bank][k] == target - 1u && !telegram_home_knob(panel, k);
+            if (mine) view_rect(pixels, 30 * (int)k + 3, 186, 24, 2, hot == k + 1u ? liv->ground : CHROME_RED);
+        }
+    }
+#endif
 
     view_rect(pixels, 0, 220, VIEW_W, 20, liv->ground);
     struct strip_hint hint[3];

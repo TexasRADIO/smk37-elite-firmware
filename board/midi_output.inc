@@ -73,9 +73,9 @@ static void midi_send_panel(const struct panel *panel)
     }
 }
 
-/* Sideman: the browser guide follows BB-37 through one 19-byte SysEx
- * state message on USB, sent when something it shows changes, at most every 40 ms, and again after
- * every USB reset so a page that opens later still hears where the instrument is. */
+ 
+
+
 static uint8_t sideman_sent[TG_SIDEMAN_BYTES];
 static uint32_t sideman_reset_seen = UINT32_MAX, sideman_ms;
 

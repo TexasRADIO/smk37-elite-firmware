@@ -4,6 +4,9 @@
  * shows what that control does to the sound: K chip, name, value, a one-line note and
  * a picture drawn from the live state. Integer arithmetic only; no allocation. */
 
+/* Drawn a few times a second in the foreground, never in the audio path: build for size. */
+#define FOCUS_SMALL __attribute__((minsize))
+
 enum {
     FOCUS_Y = 18, FOCUS_H = 166,
     PIC_X = 8, PIC_Y = 82, PIC_W = 224, PIC_H = 96
@@ -11,14 +14,14 @@ enum {
 
 #define focus_sin view_sin64
 
-static int focus_clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
+FOCUS_SMALL static int focus_clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-static void focus_px(uint16_t *pixels, int x, int y, uint16_t color)
+FOCUS_SMALL static void focus_px(uint16_t *pixels, int x, int y, uint16_t color)
 {
     if (x >= 0 && x < VIEW_W && y >= FOCUS_Y && y < FOCUS_Y + FOCUS_H) pixels[y * VIEW_W + x] = color;
 }
 
-static void focus_line(uint16_t *pixels, int x0, int y0, int x1, int y1, uint16_t color)
+FOCUS_SMALL static void focus_line(uint16_t *pixels, int x0, int y0, int x1, int y1, uint16_t color)
 {
     int dx = x1 > x0 ? x1 - x0 : x0 - x1, dy = y1 > y0 ? y0 - y1 : y1 - y0;
     int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
@@ -32,7 +35,7 @@ static void focus_line(uint16_t *pixels, int x0, int y0, int x1, int y1, uint16_
 }
 
 /* Column trace: join each sample to the previous one vertically, as view_wave does. */
-static void focus_trace(uint16_t *pixels, int x, const int16_t *ys, int n, uint16_t color)
+FOCUS_SMALL static void focus_trace(uint16_t *pixels, int x, const int16_t *ys, int n, uint16_t color)
 {
     for (int i = 0; i < n; i++) {
         int a = ys[i], b = i ? ys[i - 1] : ys[i];
@@ -41,12 +44,12 @@ static void focus_trace(uint16_t *pixels, int x, const int16_t *ys, int n, uint1
     }
 }
 
-static void focus_fill(uint16_t *pixels, int x, const int16_t *ys, int n, int base, uint16_t color)
+FOCUS_SMALL static void focus_fill(uint16_t *pixels, int x, const int16_t *ys, int n, int base, uint16_t color)
 {
     for (int i = 0; i < n; i++) if (ys[i] < base) view_rect(pixels, x + i, ys[i], 1, base - ys[i], color);
 }
 
-static char *focus_number(char *out, int value)
+FOCUS_SMALL static char *focus_number(char *out, int value)
 {
     char tmp[8];
     unsigned n = 0, v = (unsigned)(value < 0 ? -value : value);
@@ -60,38 +63,73 @@ static char *focus_number(char *out, int value)
 
 /* ---------- pictures ---------- */
 
-/* 24 dB low-pass: flat pass band, resonant peak at the corner; rings above ~85 %. */
-static void pic_filter(uint16_t *pixels, const struct view_livery *liv, int cutoff, int res, int env, uint32_t t)
+/* What the voice is doing, when the board supplies it (TG_LIVE, written after each audio block by
+ * tg_live_read). Host renders and a build without it draw the stored sound only. Nothing in a
+ * picture moves unless the voice moved it: there is no display clock in the filter or envelope. */
+FOCUS_SMALL static unsigned focus_live(tg_live *live)
 {
-    int16_t ys[PIC_W];
-    int base = PIC_Y + PIC_H - 6, top = PIC_Y + 20, corner = 10 + cutoff * (PIC_W - 40) / 127;
-    int peak = res * (PIC_H / 2) / 127;
+#ifdef TG_LIVE
+    *live = *TG_LIVE;
+    return live->active;
+#else
+    memset(live, 0, sizeof *live);
+    return 0;
+#endif
+}
+
+/* Filter position (0 closed .. 255 open, the engine's own normalized cutoff) to a column. */
+FOCUS_SMALL static int filter_column(int position)
+{
+    return 10 + focus_clamp(position, 0, 255) * (PIC_W - 40) / 255;
+}
+
+FOCUS_SMALL static void filter_curve(int16_t *ys, int corner, int peak)
+{
+    int base = PIC_Y + PIC_H - 6, top = PIC_Y + 20;
     for (int i = 0; i < PIC_W; i++) {
         int d = i - corner, y = d <= 0 ? top : top + d * d / 20 + d;
         if (d > -12 && d < 12) y -= peak * (12 - (d < 0 ? -d : d)) / 12;
         ys[i] = (int16_t)focus_clamp(y, PIC_Y + 2, base);
     }
+}
+
+/* 24 dB low-pass at the stored CUTOFF with the stored RESONANCE as its peak. `reach` is how far the
+ * stored ENV amount can move the corner (tg_filter_env_reach; negative closes): a bracket from the
+ * corner to that limit. While a note sounds, a second outline shows where the filter is now. */
+FOCUS_SMALL static void pic_filter(uint16_t *pixels, const struct view_livery *liv, const tg_patch *patch, int show_reach)
+{
+    int16_t ys[PIC_W];
+    tg_live live;
+    unsigned sounding = focus_live(&live);
+    int base = PIC_Y + PIC_H - 6, top = PIC_Y + 20;
+    int set = patch->value[TG_CUTOFF] * 255 / 127, corner = filter_column(set);
+    int peak = patch->value[TG_RESONANCE] * (PIC_H / 2) / 127;
+    int reach = tg_filter_env_reach(patch), limit = filter_column(set + reach);
+    filter_curve(ys, corner, peak);
     for (int i = 0; i < PIC_W; i += 4) view_rect(pixels, PIC_X + i, base + 2, 2, 1, liv->lamp);
     focus_fill(pixels, PIC_X, ys, PIC_W, base, liv->lamp);
     focus_trace(pixels, PIC_X, ys, PIC_W, liv->accent);
-    if (res > 108) { /* self-oscillation: a ring per beat radiating from the peak */
-        int r = 3 + (int)(t % 64u) / 4, cx = PIC_X + corner, cy = focus_clamp(top - peak + 2, PIC_Y + 18, PIC_Y + PIC_H - 18);
-        for (int a = 0; a < 64; a += 2)
-            focus_px(pixels, cx + focus_sin[(a + 16) & 63] * r / 127, cy + focus_sin[a] * r / 127, liv->accent);
-        view_small(pixels, PIC_X + focus_clamp(corner + 10, 0, PIC_W - 30), PIC_Y + 2, "SINGS", liv->accent);
+    if (show_reach && reach) { /* the envelope's range: from the corner to as far as ENV can take it */
+        int lo = corner < limit ? corner : limit, hi = corner < limit ? limit : corner;
+        for (int y = top - 2; y < base; y += 3) focus_px(pixels, PIC_X + limit, y, liv->ink);
+        view_rect(pixels, PIC_X + lo, top - 6, hi - lo + 1, 1, liv->ink);
+        view_rect(pixels, PIC_X + lo, top - 8, 1, 5, liv->ink);
+        view_rect(pixels, PIC_X + hi, top - 8, 1, 5, liv->ink);
+        const char *label = "ENV LIMIT";
+        int lw = view_small_width(label);
+        view_small(pixels, PIC_X + (limit + 5 + lw < PIC_W ? limit + 5 : limit - 5 - lw), top + 30, label, liv->ink);
     }
-    if (env > 0) { /* envelope sweep: a marker travels from the corner toward the env peak */
-        int reach = corner + env * (PIC_W / 2) / 127, phase = (int)(t % 96u);
-        int pos = phase < 16 ? corner + (reach - corner) * phase / 16 :
-                  reach - (reach - corner) * (phase - 16) / 80;
-        for (int y = top; y < base; y += 3) focus_px(pixels, PIC_X + focus_clamp(reach, 0, PIC_W - 1), y, liv->lamp);
-        view_rect(pixels, PIC_X + focus_clamp(pos, 0, PIC_W - 1), top - 4, 1, base - top + 4, liv->ink);
-        view_small(pixels, PIC_X + focus_clamp(reach + 3, 0, PIC_W - 18), base - 10, "ENV", liv->ink);
+    if (sounding && live.cutoff_now != live.cutoff_set) { /* where the held or releasing note has it now */
+        int now = filter_column(live.cutoff_now);
+        filter_curve(ys, now, peak);
+        focus_trace(pixels, PIC_X, ys, PIC_W, liv->ink);
+        view_rect(pixels, PIC_X + now, base - 3, 1, 6, liv->ink);
+        view_small(pixels, PIC_X + focus_clamp(now + 16, 0, PIC_W - 44), top + 4, live.gate ? "NOW" : "RELEASE", liv->ink);
     }
 }
 
 /* The source wave, then the same wave through a one-pole low-pass at the cutoff. */
-static void pic_wave(uint16_t *pixels, const struct view_livery *liv, const tg_patch *patch, int cutoff,
+FOCUS_SMALL static void pic_wave(uint16_t *pixels, const struct view_livery *liv, const tg_patch *patch, int cutoff,
                      int level, int x, int w)
 {
     int16_t raw[PIC_W], out[PIC_W];
@@ -111,34 +149,69 @@ static void pic_wave(uint16_t *pixels, const struct view_livery *liv, const tg_p
     focus_trace(pixels, x, out, w, liv->accent);
 }
 
-static void pic_adsr(uint16_t *pixels, const struct view_livery *liv, int a, int d, int s, int r, int hot, uint32_t t)
+/* Envelope shapes as the engine makes them, 17 points across a stage (0..255 high).
+ * Attack climbs toward 1.6 and stops at 1; decay and release fall by 95% across the stage. */
+static const uint8_t adsr_rise[17] = {0, 24, 47, 68, 89, 108, 126, 142, 158, 173, 187, 200, 212, 224, 235, 245, 255};
+static const uint8_t adsr_fall[17] = {255, 211, 175, 145, 121, 100, 83, 69, 57, 47, 39, 33, 27, 22, 19, 15, 13};
+
+FOCUS_SMALL static int adsr_shape(const uint8_t *shape, int i, int w)
 {
-    int base = PIC_Y + PIC_H - 8, top = PIC_Y + 6, span = PIC_W - 8;
-    int wa = 6 + a * span / 500, wd = 6 + d * span / 500, wr = 6 + r * span / 500, ws = span - wa - wd - wr;
-    int sy = base - s * (base - top) / 127;
-    int px[5] = {PIC_X, PIC_X + wa, PIC_X + wa + wd, PIC_X + wa + wd + ws, PIC_X + span};
-    int py[5] = {base, top, sy, sy, base};
-    view_rect(pixels, PIC_X, base + 1, span, 1, liv->lamp);
-    for (int k = 0; k < 4; k++) {
-        int w = px[k + 1] - px[k];
-        for (int i = 0; i <= w; i++) {
-            int y = py[k] + (py[k + 1] - py[k]) * i / (w ? w : 1);
-            view_rect(pixels, px[k] + i, y, 1, base - y, k == hot ? liv->lamp : liv->ground);
-        }
-        focus_line(pixels, px[k], py[k], px[k + 1], py[k + 1], k == hot ? liv->accent : liv->ink);
-        focus_line(pixels, px[k], py[k] + 1, px[k + 1], py[k + 1] + 1, k == hot ? liv->accent : liv->ink);
-        static const char *const stage[] = {"A", "D", "S", "R"};
-        view_small(pixels, (px[k] + px[k + 1]) / 2 - 2, base + 3 > PIC_Y + PIC_H - 7 ? PIC_Y + PIC_H - 7 : base + 3,
-                   stage[k], k == hot ? liv->accent : liv->lamp);
-    }
-    /* a held note's dot, once round A-D-S-R every 1.6 s */
-    int x = PIC_X + (int)(t % 1000u) * span / 1000, k = 0;
-    while (k < 3 && x >= px[k + 1]) k++;
-    int y = py[k] + (py[k + 1] - py[k]) * (x - px[k]) / ((px[k + 1] - px[k]) ? px[k + 1] - px[k] : 1);
-    view_rect(pixels, x - 2, y - 2, 5, 5, liv->ink);
+    int at = w > 0 ? i * 256 / w : 0, k = at >> 4, f = at & 15;
+    if (k >= 16) return shape[16];
+    return shape[k] + (shape[k + 1] - shape[k]) * f / 16;
 }
 
-static void pic_pulse(uint16_t *pixels, const struct view_livery *liv, int width, int pwm, int source, uint32_t t)
+/* `times`: print the hot stage's time by the engine's own law (tg_stage_ms). Dillo's borrowed use
+ * of this picture passes 0 because those are not Telegram's stage controls. */
+FOCUS_SMALL static void pic_adsr(uint16_t *pixels, const struct view_livery *liv, int a, int d, int s, int r, int hot, int times)
+{
+    int base = PIC_Y + PIC_H - 8, top = PIC_Y + 6, span = PIC_W - 8, high = base - top;
+    int wa = 6 + a * span / 500, wd = 6 + d * span / 500, wr = 6 + r * span / 500, ws = span - wa - wd - wr;
+    int sustain = s * 255 / 127;
+    int px[5] = {PIC_X, PIC_X + wa, PIC_X + wa + wd, PIC_X + wa + wd + ws, PIC_X + span};
+    int16_t ys[PIC_W];
+    for (int i = 0; i < span; i++) {
+        int x = PIC_X + i, level;
+        if (x < px[1]) level = adsr_shape(adsr_rise, x - px[0], wa);
+        else if (x < px[2]) level = sustain + (255 - sustain) * adsr_shape(adsr_fall, x - px[1], wd) / 255;
+        else if (x < px[3]) level = sustain;
+        else level = sustain * adsr_shape(adsr_fall, x - px[3], wr) / 255;
+        ys[i] = (int16_t)(base - level * high / 255);
+    }
+    view_rect(pixels, PIC_X, base + 1, span, 1, liv->lamp);
+    for (int k = 0; k < 4; k++) {
+        static const char *const stage[] = {"A", "D", "S", "R"};
+        focus_fill(pixels, px[k], ys + (px[k] - PIC_X), px[k + 1] - px[k], base, k == hot ? liv->lamp : liv->ground);
+        focus_trace(pixels, px[k], ys + (px[k] - PIC_X), px[k + 1] - px[k], k == hot ? liv->accent : liv->ink);
+        view_small(pixels, (px[k] + px[k + 1]) / 2 - 2, base + 3 > PIC_Y + PIC_H - 7 ? PIC_Y + PIC_H - 7 : base + 3,
+                   stage[k], k == hot ? liv->accent : liv->ink);
+    }
+    if (times && hot != 2) { /* the hot stage's real time */
+        unsigned ms = tg_stage_ms((unsigned)hot, (unsigned)(hot == 0 ? a : hot == 1 ? d : r));
+        char text[12], *p = focus_number(text, ms >= 1000u ? (int)(ms / 1000u) : (int)ms);
+        while (*p) p++;
+        if (ms >= 1000u) { *p++ = '.'; *p++ = (char)('0' + ms % 1000u / 100u); }
+        *p = 0;
+        int x = view_small(pixels, PIC_X + PIC_W - 52, PIC_Y, text, liv->ink);
+        view_small(pixels, x + 3, PIC_Y, ms >= 1000u ? "S" : "MS", liv->ink);
+    }
+    /* The sounding note: a dot on the curve at the stage and level the voice reports. No note, no dot. */
+    tg_live live;
+    if (times && focus_live(&live)) {
+        int k = live.stage == TG_LIVE_ATTACK ? 0 : live.stage == TG_LIVE_DECAY ? 1 : 3;
+        int want = base - live.level * high / 255, best = px[k], gap = 1 << 30;
+        if (k == 1 && live.level <= sustain + 2) { k = 2; best = (px[2] + px[3]) / 2; } /* settled on sustain */
+        else
+            for (int x = px[k]; x < px[k + 1]; x++) {
+                int miss = ys[x - PIC_X] - want;
+                if (miss < 0) miss = -miss;
+                if (miss < gap) { gap = miss; best = x; }
+            }
+        view_rect(pixels, best - 2, focus_clamp(want, top, base) - 2, 5, 5, liv->ink);
+    }
+}
+
+FOCUS_SMALL static void pic_pulse(uint16_t *pixels, const struct view_livery *liv, int width, int pwm, int source, uint32_t t)
 {
     int hi = PIC_Y + 10, lo = PIC_Y + PIC_H - 12, cw = PIC_W / 2;
     int rest = 50 - width * 45 / 127, swing = source ? focus_sin[(t / 8u) & 63] * pwm * 20 / (127 * 127) : 0;
@@ -160,7 +233,7 @@ static void pic_pulse(uint16_t *pixels, const struct view_livery *liv, int width
 }
 
 /* LFO scrolling at a speed that rises with the rate; shape from the MOD selector. */
-static void pic_lfo(uint16_t *pixels, const struct view_livery *liv, int rate, int wave, int depth, uint32_t t)
+FOCUS_SMALL static void pic_lfo(uint16_t *pixels, const struct view_livery *liv, int rate, int wave, int depth, uint32_t t)
 {
     static const int8_t random_levels[8] = {80, -90, 110, -20, 40, -120, 10, 95};
     int16_t ys[PIC_W];
@@ -179,7 +252,7 @@ static void pic_lfo(uint16_t *pixels, const struct view_livery *liv, int rate, i
     focus_trace(pixels, PIC_X, ys, PIC_W, liv->accent);
 }
 
-static void pic_glide(uint16_t *pixels, const struct view_livery *liv, int amount, int max, uint32_t t)
+FOCUS_SMALL static void pic_glide(uint16_t *pixels, const struct view_livery *liv, int amount, int max, uint32_t t)
 {
     int16_t ys[PIC_W];
     int y0 = PIC_Y + PIC_H - 18, y1 = PIC_Y + 14, span = PIC_W - 40, start = span / 10;
@@ -191,13 +264,69 @@ static void pic_glide(uint16_t *pixels, const struct view_livery *liv, int amoun
     view_rect(pixels, PIC_X, y0, 12, 6, liv->lamp);
     view_rect(pixels, PIC_X + PIC_W - 12, y1, 12, 6, liv->lamp);
     focus_trace(pixels, PIC_X + 20, ys, span, liv->accent);
-    int travel = (int)(t % 1000u) * span / 1000;
-    view_rect(pixels, PIC_X + 20 + travel - 2, ys[travel] - 2, 5, 5, liv->ink);
+    (void)t; /* the path is the setting; no dot rides it on a display clock */
     view_small(pixels, PIC_X, y0 + 9, "C3", liv->ink);
     view_small(pixels, PIC_X + PIC_W - 14, y1 - 9, "C4", liv->ink);
 }
 
-static void pic_meter(uint16_t *pixels, const struct view_livery *liv, int level, uint32_t t)
+/* Dillo's slide, on the pattern's own steps: the step that carries the slide, the note it slides
+ * into, and the pitch path between them. The path is the voice's law (an RC approach whose time
+ * constant is a fifth of SLIDE TIME) drawn against the length of a step at the current tempo. */
+FOCUS_SMALL static void pic_slide(uint16_t *pixels, const struct view_livery *liv, const dillo_phrase *phrase,
+                      unsigned cursor, int slide_ms, unsigned tempo)
+{
+    static const uint8_t approach[17] = {255, 187, 137, 100, 73, 54, 39, 29, 21, 15, 11, 8, 6, 4, 3, 2, 2};
+    unsigned grid = dillo_phrase_grid(phrase), from = DILLO_STEPS, to = 0;
+    for (unsigned n = 0; n < grid && from == DILLO_STEPS; n++) { /* the first slid step at or after the cursor */
+        unsigned i = (cursor + n) % grid, j = (i + 1u) % grid;
+        if (phrase->steps[i].event == DILLO_NOTE && (phrase->steps[i].flags & DILLO_SLIDE) &&
+            phrase->steps[j].event == DILLO_NOTE) { from = i; to = j; }
+    }
+    if (from == DILLO_STEPS) {
+        view_small(pixels, PIC_X, PIC_Y + PIC_H / 2 - 10, "NO STEP IN THIS PATTERN SLIDES", liv->ink);
+        view_small(pixels, PIC_X, PIC_Y + PIC_H / 2 + 2, "MARK A STEP'S SLIDE TO HEAR THIS", liv->lamp);
+        return;
+    }
+    int a = phrase->steps[from].pitch, b = phrase->steps[to].pitch, w = (PIC_W - 8) / 2;
+    int lo = a < b ? a : b, hi = a < b ? b : a, range = hi - lo;
+    int y_lo = PIC_Y + PIC_H - 26, y_hi = PIC_Y + 22;
+    int ya = range ? y_lo - (a - lo) * (y_lo - y_hi) / range : (y_lo + y_hi) / 2;
+    int yb = range ? y_lo - (b - lo) * (y_lo - y_hi) / range : (y_lo + y_hi) / 2;
+    int step_ms = (int)(15000u / (tempo ? tempo : 120u));
+    int len = focus_clamp(slide_ms * w / (step_ms ? step_ms : 1), 2, w);
+    int16_t ys[PIC_W];
+    for (int i = 0; i < 2 * w; i++) {
+        int y = ya;
+        if (i >= w) {
+            int u = (i - w) * 256 / len, k = u >> 4, f = u & 15;
+            int left = k >= 16 ? 0 : approach[k] + (approach[k + 1] - approach[k]) * f / 16;
+            y = yb + (ya - yb) * left / 255;
+        }
+        ys[i] = (int16_t)y;
+    }
+    for (unsigned n = 0; n < 2; n++) { /* the two steps: number, note, accent */
+        unsigned i = n ? to : from;
+        int x = PIC_X + (int)n * (w + 8);
+        char text[6], *num = focus_number(text, (int)i + 1);
+        view_rect(pixels, x, PIC_Y + PIC_H - 14, w, 12, liv->lamp);
+        int tx = view_small(pixels, x + 4, PIC_Y + PIC_H - 11, "STEP ", liv->ink);
+        tx = view_small(pixels, tx, PIC_Y + PIC_H - 11, num, liv->ink);
+        char note[6];
+        tx = view_small(pixels, tx + 8, PIC_Y + PIC_H - 11, jukebox_note_name(note, phrase->steps[i].pitch ? phrase->steps[i].pitch : TG_NOTE_ZERO), liv->accent);
+        if (phrase->steps[i].flags & DILLO_ACCENT) view_small(pixels, tx + 6, PIC_Y + PIC_H - 11, "ACC", CHROME_RED);
+    }
+    view_rect(pixels, PIC_X + w + 3, PIC_Y + 14, 1, PIC_H - 30, liv->lamp);
+    focus_trace(pixels, PIC_X, ys, w, liv->accent);
+    focus_trace(pixels, PIC_X + w + 8, ys + w, w, liv->accent);
+    for (int k = -1; k <= 1; k++) { /* thicker */
+        if (!k) continue;
+        for (int i = 0; i < w; i++) { focus_px(pixels, PIC_X + i, ys[i] + k, liv->accent); focus_px(pixels, PIC_X + w + 8 + i, ys[w + i] + k, liv->accent); }
+    }
+    view_rect(pixels, PIC_X + w + 8, y_lo + 6, len, 2, liv->ink); /* how much of the next step the slide takes */
+    view_small(pixels, PIC_X, PIC_Y, "SLIDES INTO THE NEXT NOTE", liv->ink);
+}
+
+FOCUS_SMALL static void pic_meter(uint16_t *pixels, const struct view_livery *liv, int level, uint32_t t)
 {
     int h = PIC_H - 4, beat = (int)(t % 160u), fill = h * level / 127 * (160 - beat / 2) / 160;
     for (int k = 0; k < 2; k++)
@@ -206,7 +335,7 @@ static void pic_meter(uint16_t *pixels, const struct view_livery *liv, int level
                       y < fill ? (y > h * 85 / 100 ? CHROME_RED : liv->accent) : liv->lamp);
 }
 
-static void pic_keys(uint16_t *pixels, const struct view_livery *liv, int x, int y, int w, int h,
+FOCUS_SMALL static void pic_keys(uint16_t *pixels, const struct view_livery *liv, int x, int y, int w, int h,
                      uint16_t lit_white, uint16_t lit_black, unsigned root)
 {
     static const uint8_t white[7] = {0, 2, 4, 5, 7, 9, 11}, black[5] = {1, 3, 6, 8, 10};
@@ -225,7 +354,7 @@ static void pic_keys(uint16_t *pixels, const struct view_livery *liv, int x, int
     }
 }
 
-static void pic_scale(uint16_t *pixels, const struct view_livery *liv, unsigned root, unsigned type)
+FOCUS_SMALL static void pic_scale(uint16_t *pixels, const struct view_livery *liv, unsigned root, unsigned type)
 {
     static const uint8_t white[7] = {0, 2, 4, 5, 7, 9, 11}, black[5] = {1, 3, 6, 8, 10};
     unsigned mask = scale_intervals[type];
@@ -236,7 +365,7 @@ static void pic_scale(uint16_t *pixels, const struct view_livery *liv, unsigned 
     view_small(pixels, PIC_X, PIC_Y + PIC_H - 14, type ? "KEYS SNAP TO THE LIT NOTES" : "SCALE OFF - EVERY KEY PLAYS", liv->ink);
 }
 
-static void pic_keybed_track(uint16_t *pixels, const struct view_livery *liv, int amount)
+FOCUS_SMALL static void pic_keybed_track(uint16_t *pixels, const struct view_livery *liv, int amount)
 {
     int ky = PIC_Y + PIC_H - 20;
     pic_keys(pixels, liv, PIC_X, ky, PIC_W / 3, 18, 0, 0, 12);
@@ -251,7 +380,7 @@ static void pic_keybed_track(uint16_t *pixels, const struct view_livery *liv, in
     view_small(pixels, PIC_X, PIC_Y + 4, "CUTOFF FOLLOWS THE KEY", liv->ink);
 }
 
-static void pic_vibrato(uint16_t *pixels, const struct view_livery *liv, int depth, int rate, uint32_t t)
+FOCUS_SMALL static void pic_vibrato(uint16_t *pixels, const struct view_livery *liv, int depth, int rate, uint32_t t)
 {
     int16_t ys[PIC_W];
     int mid = PIC_Y + PIC_H / 2, amp = depth * (PIC_H * 38 / 100) / 127;
@@ -262,7 +391,7 @@ static void pic_vibrato(uint16_t *pixels, const struct view_livery *liv, int dep
     view_small(pixels, PIC_X, mid - 10, "C4", liv->ink);
 }
 
-static void pic_tiles(uint16_t *pixels, const struct view_livery *liv, const char *const *labels, unsigned n, unsigned selected)
+FOCUS_SMALL static void pic_tiles(uint16_t *pixels, const struct view_livery *liv, const char *const *labels, unsigned n, unsigned selected)
 {
     int gap = 4, w = (PIC_W - (int)(n - 1u) * gap) / (int)n;
     for (unsigned i = 0; i < n; i++) {
@@ -274,7 +403,7 @@ static void pic_tiles(uint16_t *pixels, const struct view_livery *liv, const cha
     }
 }
 
-static void pic_footage(uint16_t *pixels, const struct view_livery *liv, unsigned range)
+FOCUS_SMALL static void pic_footage(uint16_t *pixels, const struct view_livery *liv, unsigned range)
 {
     static const char *const feet[] = {"16'", "8'", "4'", "2'"};
     int w = (PIC_W - 12) / 4;
@@ -289,7 +418,7 @@ static void pic_footage(uint16_t *pixels, const struct view_livery *liv, unsigne
     view_small(pixels, PIC_X, PIC_Y + 74, "THE 37 KEYS LAND HERE", liv->ink);
 }
 
-static void pic_tempo(uint16_t *pixels, const struct view_livery *liv, int bpm, uint32_t t)
+FOCUS_SMALL static void pic_tempo(uint16_t *pixels, const struct view_livery *liv, int bpm, uint32_t t)
 {
     int cx = PIC_X + PIC_W / 2, cy = PIC_Y + 4, len = PIC_H - 16;
     unsigned beat_frames = (unsigned)(625 * 60 / (bpm > 0 ? bpm : 120));
@@ -304,7 +433,7 @@ static void pic_tempo(uint16_t *pixels, const struct view_livery *liv, int bpm, 
     if (phase < 4u || (phase >= 32u && phase < 36u)) view_rect(pixels, cx - 2, PIC_Y + PIC_H - 6, 5, 3, liv->accent);
 }
 
-static void pic_drive(uint16_t *pixels, const struct view_livery *liv, int drive)
+FOCUS_SMALL static void pic_drive(uint16_t *pixels, const struct view_livery *liv, int drive)
 {
     int16_t clean[PIC_W], hot[PIC_W];
     int mid = PIC_Y + PIC_H / 2, amp = PIC_H * 38 / 100, gain = 128 + drive * 8;
@@ -319,7 +448,7 @@ static void pic_drive(uint16_t *pixels, const struct view_livery *liv, int drive
     focus_trace(pixels, PIC_X, hot, PIC_W, liv->accent);
 }
 
-static void pic_delay(uint16_t *pixels, const struct view_livery *liv, int amount, uint32_t t)
+FOCUS_SMALL static void pic_delay(uint16_t *pixels, const struct view_livery *liv, int amount, uint32_t t)
 {
     int base = PIC_Y + PIC_H - 4, h = PIC_H - 10, ratio = 300 + amount * 620 / 127, lit = (int)(t / 160u) % 7;
     for (int k = 0; k < 7 && h > 1; k++) {
@@ -329,7 +458,7 @@ static void pic_delay(uint16_t *pixels, const struct view_livery *liv, int amoun
     view_rect(pixels, PIC_X, base, PIC_W, 1, liv->lamp);
 }
 
-static void pic_reverb(uint16_t *pixels, const struct view_livery *liv, int amount, uint32_t t)
+FOCUS_SMALL static void pic_reverb(uint16_t *pixels, const struct view_livery *liv, int amount, uint32_t t)
 {
     int cx = PIC_X + 20, cy = PIC_Y + PIC_H / 2, reach = (PIC_W - 30) * (32 + amount * 96 / 127) / 128;
     int grow = (int)(t % 320u), n = 30 + amount * 160 / 127;
@@ -343,7 +472,7 @@ static void pic_reverb(uint16_t *pixels, const struct view_livery *liv, int amou
     }
 }
 
-static void pic_tuner(uint16_t *pixels, const struct view_livery *liv, int cents)
+FOCUS_SMALL static void pic_tuner(uint16_t *pixels, const struct view_livery *liv, int cents)
 {
     int cx = PIC_X + PIC_W / 2, cy = PIC_Y + PIC_H - 6, r = PIC_H - 14;
     for (int c = -50; c <= 50; c += 10) {
@@ -360,7 +489,7 @@ static void pic_tuner(uint16_t *pixels, const struct view_livery *liv, int cents
     view_small(pixels, PIC_X + PIC_W - 18, cy - 8, "+50", liv->ink);
 }
 
-static void pic_channels(uint16_t *pixels, const struct view_livery *liv, unsigned channel, const char *note)
+FOCUS_SMALL static void pic_channels(uint16_t *pixels, const struct view_livery *liv, unsigned channel, const char *note)
 {
     for (unsigned i = 0; i < 16; i++) {
         int x = PIC_X + (int)(i % 8u) * (PIC_W / 8), y = PIC_Y + 4 + (int)(i / 8u) * 24;
@@ -372,7 +501,7 @@ static void pic_channels(uint16_t *pixels, const struct view_livery *liv, unsign
     view_small(pixels, PIC_X, PIC_Y + 58, note, liv->ink);
 }
 
-static void pic_decay(uint16_t *pixels, const struct view_livery *liv, int ms, int max_ms, const char *note)
+FOCUS_SMALL static void pic_decay(uint16_t *pixels, const struct view_livery *liv, int ms, int max_ms, const char *note)
 {
     int16_t ys[PIC_W];
     int base = PIC_Y + PIC_H - 6, top = PIC_Y + 10, level = 1024;
@@ -387,7 +516,7 @@ static void pic_decay(uint16_t *pixels, const struct view_livery *liv, int ms, i
     if (note) view_small(pixels, PIC_X + 40, PIC_Y, note, liv->ink);
 }
 
-static void pic_saw_square(uint16_t *pixels, const struct view_livery *liv, unsigned square)
+FOCUS_SMALL static void pic_saw_square(uint16_t *pixels, const struct view_livery *liv, unsigned square)
 {
     int half = PIC_W / 2, top = PIC_Y + 10, bottom = PIC_Y + PIC_H - 22;
     uint16_t saw = square ? liv->lamp : liv->accent, sq = square ? liv->accent : liv->lamp;
@@ -401,7 +530,7 @@ static void pic_saw_square(uint16_t *pixels, const struct view_livery *liv, unsi
     view_small(pixels, PIC_X + half + half / 2 - 18, PIC_Y + PIC_H - 10, "SQUARE", sq);
 }
 
-static void pic_gate(uint16_t *pixels, const struct view_livery *liv, int percent)
+FOCUS_SMALL static void pic_gate(uint16_t *pixels, const struct view_livery *liv, int percent)
 {
     int cw = PIC_W / 8, mid = PIC_Y + PIC_H / 2;
     for (int i = 0; i < 8; i++) {
@@ -411,7 +540,7 @@ static void pic_gate(uint16_t *pixels, const struct view_livery *liv, int percen
     view_small(pixels, PIC_X, PIC_Y, "OF EACH STEP SOUNDS", liv->ink);
 }
 
-static void pic_swing(uint16_t *pixels, const struct view_livery *liv, int swing25)
+FOCUS_SMALL static void pic_swing(uint16_t *pixels, const struct view_livery *liv, int swing25)
 {
     int cw = PIC_W / 8;
     for (int i = 0; i < 8; i++) {
@@ -422,7 +551,7 @@ static void pic_swing(uint16_t *pixels, const struct view_livery *liv, int swing
     view_small(pixels, PIC_X, PIC_Y, swing25 ? "EVERY SECOND STEP LANDS LATE" : "STRAIGHT", liv->ink);
 }
 
-static void pic_loop(uint16_t *pixels, const struct view_livery *liv, int length, int steps)
+FOCUS_SMALL static void pic_loop(uint16_t *pixels, const struct view_livery *liv, int length, int steps)
 {
     int shown = length > 32 ? steps : 32, cw = PIC_W * 100 / shown;
     for (int i = 0; i < shown && i < 100; i++)
@@ -437,13 +566,47 @@ static void pic_loop(uint16_t *pixels, const struct view_livery *liv, int length
     view_small(pixels, PIC_X, PIC_Y, "PLAYS THIS MANY STEPS, THEN BACK", liv->ink);
 }
 
+#ifdef ELITE_DRUMS808
+/* MOTION: the recorded movement of one knob across its bar. The thin line is the control's own
+ * value; the bars are where the movement takes it; the marker is where the bar is now. */
+FOCUS_SMALL static void pic_motion(uint16_t *pixels, const struct view_livery *liv, const struct panel *panel)
+{
+    unsigned target = panel->motion_target, range = motion_range(target), state = panel->motion_state;
+    int top = PIC_Y + 14, base = PIC_Y + PIC_H - 14, high = base - top, w = PIC_W / MOTION_POINTS;
+    int own = state == MOTION_RECORDING ? motion.base : (int)motion_get(panel, target);
+    int own_y = base - own * high / (int)range;
+    for (int i = 0; i < PIC_W; i += 3) focus_px(pixels, PIC_X + i, own_y, liv->ink);
+    if (state != MOTION_ARMED)
+        for (unsigned i = 0; i < MOTION_POINTS; i++) {
+            unsigned done = state == MOTION_PLAYING || (unsigned)(((motion.position >> 8) + MOTION_POINTS - i) % MOTION_POINTS) * 256u <= motion.travelled;
+            int value = focus_clamp(own + motion.offset[i], 0, (int)range), y = base - value * high / (int)range;
+            if (!done) continue;
+            if (y < own_y) view_rect(pixels, PIC_X + (int)i * w, y, w - 1, own_y - y + 1, liv->accent);
+            else view_rect(pixels, PIC_X + (int)i * w, own_y, w - 1, y - own_y + 1, liv->accent);
+        }
+    for (unsigned beat = 0; beat <= 4; beat++) /* the bar's four beats */
+        view_rect(pixels, focus_clamp(PIC_X + (int)beat * (PIC_W / 4), PIC_X, PIC_X + PIC_W - 1), base + 3, 1, 4, liv->lamp);
+    if (state != MOTION_ARMED)
+        view_rect(pixels, PIC_X + (int)(motion.position * (unsigned)PIC_W / MOTION_SPAN), top - 4, 1, base - top + 8, liv->ink);
+    view_small(pixels, PIC_X, PIC_Y, state == MOTION_ARMED ? "TURN IT NOW: ONE BAR RECORDS" :
+               state == MOTION_RECORDING ? "RECORDING ONE BAR" : "LOOPS WITH THIS SOUND", state == MOTION_PLAYING ? liv->ink : CHROME_RED);
+    view_small(pixels, PIC_X, PIC_Y + PIC_H - 7, state == MOTION_PLAYING ? "REC REMOVES IT" : "REC CANCELS", liv->ink);
+}
+
+/* The recordable control the strip's knob was just turned for (MOTION target), or 0. */
+FOCUS_SMALL static unsigned focus_motion_target(const struct panel *panel)
+{
+    return motion.turned_target && motion.turned_frames == panel->strip_frame ? motion.turned_target : 0;
+}
+#endif
+
 /* ---------- which control, which picture ---------- */
 
 enum focus_picture {
     PIC_NONE, PIC_LEVEL, PIC_CUTOFF, PIC_RES, PIC_ENV, PIC_PULSE, PIC_DECAY_101, PIC_LFO, PIC_GLIDE,
     PIC_TRACK, PIC_PWM, PIC_VCF_LFO, PIC_VIBRATO, PIC_FOOTAGE, PIC_TEMPO, PIC_DRIVE, PIC_DELAY,
     PIC_REVERB, PIC_TILES, PIC_TUNER, PIC_SCALE, PIC_CHANNEL, PIC_DECAY, PIC_SAWSQ, PIC_GATE,
-    PIC_SWING, PIC_LOOP, PIC_ADSR_STAGE
+    PIC_SWING, PIC_LOOP, PIC_ADSR_STAGE, PIC_SLIDE, PIC_MOTION
 };
 
 struct focus_card {
@@ -453,14 +616,15 @@ struct focus_card {
     char text[12];   /* value as text when not numeric */
 };
 
-static int focus_telegram(const tg_controls *sound, unsigned control, struct focus_card *c)
+FOCUS_SMALL static int focus_telegram(const tg_controls *sound, unsigned control, struct focus_card *c)
 {
     c->value = (int)control_value(sound, control);
     switch (control) {
     case CTRL_LEVEL: c->picture = PIC_LEVEL; c->label = "LEVEL"; c->note = "OUTPUT LEVEL"; return 1;
     case TG_CUTOFF: c->picture = PIC_CUTOFF; c->label = "CUTOFF"; c->note = "HIGHER = MORE HARMONICS"; return 1;
     case TG_RESONANCE: c->picture = PIC_RES; c->label = "RESONANCE"; c->note = "PEAK AT THE CUTOFF"; return 1;
-    case TG_ENV: c->picture = PIC_ENV; c->label = "ENV MOD"; c->note = "HOW FAR EACH NOTE OPENS IT"; return 1;
+    case TG_ENV: c->picture = PIC_ENV; c->label = "ENV MOD";
+        c->note = sound->patch.filter_env_mode == TG_FILTER_ENV_CLOSE ? "HOW FAR EACH NOTE CLOSES IT" : "HOW FAR EACH NOTE OPENS IT"; return 1;
     case TG_WIDTH: c->picture = PIC_PULSE; c->label = "PULSE WIDTH"; c->note = "NARROWER = THINNER"; return 1;
     case TG_DECAY: c->picture = PIC_DECAY_101; c->label = "DECAY"; c->note = "HOW FAST IT FALLS"; return 1;
     case TG_ATTACK: case TG_SUSTAIN: case TG_RELEASE:
@@ -485,13 +649,13 @@ static int focus_telegram(const tg_controls *sound, unsigned control, struct foc
     return 0;
 }
 
-static void focus_copy_label(char *destination, const char *label)
+FOCUS_SMALL static void focus_copy_label(char *destination, const char *label)
 {
     while (*label) *destination++ = *label++;
     *destination = 0;
 }
 
-static int focus_lookup(const struct panel *panel, unsigned k, struct focus_card *c)
+FOCUS_SMALL static int focus_lookup(const struct panel *panel, unsigned k, struct focus_card *c)
 {
     static const char *const sub_modes[] = {"-1 SQ", "-2 SQ", "-2 PULSE"};
     static const char *const triggers[] = {"GATE+TRIG", "GATE", "LFO"};
@@ -537,7 +701,7 @@ static int focus_lookup(const struct panel *panel, unsigned k, struct focus_card
             }
             return 0;
         }
-        if (k == 5) { c->picture = PIC_GLIDE; c->label = "SLIDE TIME"; c->unit = "MS"; c->value = tone->slide_ms; c->a = tone->slide_ms; c->b = 255; return 1; }
+        if (k == 5) { c->picture = PIC_SLIDE; c->label = "SLIDE TIME"; c->unit = "MS"; c->value = tone->slide_ms; c->a = tone->slide_ms; return 1; }
         if (k == 6) { c->picture = PIC_SAWSQ; c->label = "WAVEFORM"; c->value = -1; c->a = !tone->wave;
                       memcpy(c->text, tone->wave ? "SAW" : "SQUARE", tone->wave ? 4 : 7); return 1; }
         if (k == 7) { c->picture = PIC_DRIVE; c->label = "DRIVE"; c->value = tone->drive; c->a = tone->drive * 127 / 100; return 1; }
@@ -571,9 +735,9 @@ static int focus_lookup(const struct panel *panel, unsigned k, struct focus_card
     }
     if (page == PAGE_GLOBAL) {
         if (k == 0 || k == 1) {
-            static const char *const roots[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-            static const char *const scales[] = {"OFF", "MAJOR", "MINOR", "DORIAN", "LYDIAN", "MAJ PENT", "MIN PENT"};
-            _Static_assert(sizeof scales / sizeof scales[0] == sizeof scale_intervals / sizeof scale_intervals[0],
+            const char *const *roots = view_root_names;
+            const char *const *scales = view_scale_names;
+            _Static_assert(sizeof view_scale_names / sizeof view_scale_names[0] == sizeof scale_intervals / sizeof scale_intervals[0],
                            "scale names follow scale_intervals");
             const char *name = k ? scales[panel->scale_type] : roots[panel->scale_root];
             c->picture = PIC_SCALE; c->label = k ? "SCALE" : "SCALE ROOT"; c->value = -1;
@@ -625,7 +789,7 @@ static int focus_lookup(const struct panel *panel, unsigned k, struct focus_card
  * value, and for a moment after a turn a fading trail behind it so the screen feels the turn. */
 static const int8_t focus_dial_point[32][2] = {{-6, -6}, {-7, -5}, {-8, -4}, {-9, -3}, {-9, -2}, {-9, 0}, {-9, 1}, {-9, 2}, {-8, 4}, {-8, 5}, {-7, 6}, {-6, 7}, {-5, 8}, {-3, 8}, {-2, 9}, {-1, 9}, {1, 9}, {2, 9}, {3, 8}, {5, 8}, {6, 7}, {7, 6}, {8, 5}, {8, 4}, {9, 2}, {9, 1}, {9, 0}, {9, -2}, {9, -3}, {8, -4}, {7, -5}, {6, -6}};
 
-static void focus_dial(uint16_t *pixels, const struct view_livery *liv, int cx, int cy, int value, int max, uint32_t age)
+FOCUS_SMALL static void focus_dial(uint16_t *pixels, const struct view_livery *liv, int cx, int cy, int value, int max, uint32_t age)
 {
     if (max <= 0) max = 127;
     int at = value < 0 ? 0 : value > max ? 31 : value * 31 / max;
@@ -644,7 +808,7 @@ static void focus_dial(uint16_t *pixels, const struct view_livery *liv, int cx, 
     view_rect(pixels, cx + focus_dial_point[at][0] - 1, cy + focus_dial_point[at][1] - 1, 4, 4, liv->accent);
 }
 
-static void view_focus(uint16_t *pixels, const struct panel *panel)
+FOCUS_SMALL static void view_focus(uint16_t *pixels, const struct panel *panel)
 {
     if (!panel->strip_knob || (uint32_t)(panel->view_frames - panel->strip_frame) >= CONTROL_FOCUS_FRAMES) return;
     unsigned k = panel->strip_knob - 1u;
@@ -672,25 +836,34 @@ static void view_focus(uint16_t *pixels, const struct panel *panel)
     if (c.note && c.picture != PIC_CHANNEL) /* beside the value when it fits, else under it */
         view_small(pixels, 32, 32 + view_small_width(c.note) + 6 < 234 - width ? 46 : 74, c.note, liv->ink);
 
+#ifdef ELITE_DRUMS808
+    unsigned motion_target = focus_motion_target(panel);
+    if (c.picture == PIC_MOTION || (panel->motion_state && motion_target && motion_target == panel->motion_target)) {
+        pic_motion(pixels, liv, panel);
+        return;
+    }
+    if (motion_target && !panel->motion_state) { /* this knob's movement can be recorded */
+        const char *hint = "REC: RECORD A BAR";
+        view_small(pixels, 234 - view_small_width(hint), 26, hint, liv->ink);
+    }
+#endif
     switch (c.picture) {
     case PIC_LEVEL:
         pic_wave(pixels, liv, patch, patch->value[TG_CUTOFF], c.value, PIC_X, PIC_W - 24);
         pic_meter(pixels, liv, c.value, t);
         break;
-    case PIC_CUTOFF: case PIC_RES:
-        pic_filter(pixels, liv, patch->value[TG_CUTOFF], patch->value[TG_RESONANCE], 0, t);
-        break;
-    case PIC_ENV: pic_filter(pixels, liv, patch->value[TG_CUTOFF], patch->value[TG_RESONANCE], c.value, t); break;
+    case PIC_CUTOFF: case PIC_RES: pic_filter(pixels, liv, patch, 0); break;
+    case PIC_ENV: pic_filter(pixels, liv, patch, 1); break;
     case PIC_PULSE: pic_pulse(pixels, liv, patch->value[TG_WIDTH], 0, 0, t); break;
     case PIC_PWM: pic_pulse(pixels, liv, patch->value[TG_WIDTH], patch->value[TG_PWM], patch->pwm, t); break;
     case PIC_DECAY_101:
         pic_adsr(pixels, liv, patch->value[TG_ATTACK], patch->value[TG_DECAY], patch->value[TG_SUSTAIN],
-                 patch->value[TG_RELEASE], 1, t);
+                 patch->value[TG_RELEASE], 1, 1);
         break;
     case PIC_ADSR_STAGE:
-        if (c.b) pic_adsr(pixels, liv, c.b - 1, 60, 0, 12, 0, t); /* Dillo: attack into the 303 decay */
+        if (c.b) pic_adsr(pixels, liv, c.b - 1, 60, 0, 12, 0, 0); /* Dillo: attack into the 303 decay */
         else pic_adsr(pixels, liv, patch->value[TG_ATTACK], patch->value[TG_DECAY], patch->value[TG_SUSTAIN],
-                      patch->value[TG_RELEASE], c.a, t);
+                      patch->value[TG_RELEASE], c.a, 1);
         break;
     case PIC_LFO: pic_lfo(pixels, liv, patch->value[TG_LFO_RATE], patch->lfo_wave, 127, t); break;
     case PIC_VCF_LFO: pic_lfo(pixels, liv, patch->value[TG_LFO_RATE], patch->lfo_wave, c.value, t); break;
@@ -711,5 +884,7 @@ static void view_focus(uint16_t *pixels, const struct panel *panel)
     case PIC_GATE: pic_gate(pixels, liv, c.a); break;
     case PIC_SWING: pic_swing(pixels, liv, c.a); break;
     case PIC_LOOP: pic_loop(pixels, liv, c.a, TG_STEPS); break;
+    case PIC_MOTION: break; /* drawn above */
+    case PIC_SLIDE: pic_slide(pixels, liv, &panel->dillo_pattern, panel->dillo_cursor, c.a, sound->tempo); break;
     }
 }

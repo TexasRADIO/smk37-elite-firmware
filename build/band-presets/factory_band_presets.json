@@ -1,6 +1,6 @@
 {
   "catalogue_sha256": "439c04d3caf5a07c9190a089e5b679ccabf962a25cb4f966016dd5b058e8f451",
-  "synth_manifest_sha256": "8e102b452aeca3a6efc5034937814f7c23b33e908ed402cbadf7da1ba7746feb",
+  "synth_manifest_sha256": "ee3038d07e8e3e585bd77b3ef5fe1b133e329dba59ad9896805ffda1f2b6d4eb",
   "synth_include_sha256": "5cfd1e123c033c68473684825fe90beb2a2922654b499c898c2f3758efcb1cd1",
   "studio_defaults_sha256": "cb6e989e9690a17406fa51c58960236a104e9dcae0857dcf2c6a80de5c78a10e",
   "include_sha256": "92f36a72b275ff895ab77aa3470289b7dcc0b504b6f47b2af194da12a4efc2da",
@@ -189,7 +189,7 @@
     },
     {
       "source": "bb1_songs",
-      "name": "Proble\u0300mes D'Amour",
+      "name": "Problèmes D'Amour",
       "start": 446,
       "count": 6,
       "display_name": "PROBLEMES"
@@ -336,7 +336,7 @@
     },
     {
       "source": "bb1_songs",
-      "name": "Oxyge\u0300ne (Part IV)",
+      "name": "Oxygène (Part IV)",
       "start": 541,
       "count": 2,
       "display_name": "OXYGENE IV"
@@ -3183,7 +3183,7 @@
     {
       "source": "bb1_songs",
       "id": "LIB-DPC-05-S01-16-1-R2",
-      "title": "Computer Love Part 1 \u00b7 Kick 1",
+      "title": "Computer Love Part 1 · Kick 1",
       "name": "KICK 1 A",
       "bar": 0,
       "bars": 2,
@@ -3200,7 +3200,7 @@
     {
       "source": "bb1_songs",
       "id": "LIB-DPC-05-S01-16-1-R2",
-      "title": "Computer Love Part 1 \u00b7 Kick 1",
+      "title": "Computer Love Part 1 · Kick 1",
       "name": "KICK 1 B",
       "bar": 1,
       "bars": 2,
@@ -3217,7 +3217,7 @@
     {
       "source": "bb1_songs",
       "id": "LIB-DPC-05-S01-16-1-R3",
-      "title": "Computer Love Part 1 \u00b7 Kick 2",
+      "title": "Computer Love Part 1 · Kick 2",
       "name": "KICK 2 A",
       "bar": 0,
       "bars": 2,
@@ -3234,7 +3234,7 @@
     {
       "source": "bb1_songs",
       "id": "LIB-DPC-05-S01-16-1-R3",
-      "title": "Computer Love Part 1 \u00b7 Kick 2",
+      "title": "Computer Love Part 1 · Kick 2",
       "name": "KICK 2 B",
       "bar": 1,
       "bars": 2,
@@ -3251,7 +3251,7 @@
     {
       "source": "bb1_songs",
       "id": "LIB-DPC-05-S01-16-1-R4",
-      "title": "Computer Love Part 1 \u00b7 Kick 3",
+      "title": "Computer Love Part 1 · Kick 3",
       "name": "KICK 3 A",
       "bar": 0,
       "bars": 2,
@@ -3268,7 +3268,7 @@
     {
       "source": "bb1_songs",
       "id": "LIB-DPC-05-S01-16-1-R4",
-      "title": "Computer Love Part 1 \u00b7 Kick 3",
+      "title": "Computer Love Part 1 · Kick 3",
       "name": "KICK 3 B",
       "bar": 1,
       "bars": 2,
@@ -3285,7 +3285,7 @@
     {
       "source": "bb1_songs",
       "id": "LIB-DPC-05-S01-16-1-R5",
-      "title": "Computer Love Part 1 \u00b7 Kick 4",
+      "title": "Computer Love Part 1 · Kick 4",
       "name": "KICK 4 A",
       "bar": 0,
       "bars": 2,
@@ -3302,7 +3302,7 @@
     {
       "source": "bb1_songs",
       "id": "LIB-DPC-05-S01-16-1-R5",
-      "title": "Computer Love Part 1 \u00b7 Kick 4",
+      "title": "Computer Love Part 1 · Kick 4",
       "name": "KICK 4 B",
       "bar": 1,
       "bars": 2,
@@ -3661,7 +3661,7 @@
     {
       "source": "bb1_songs",
       "id": "LIB-DPC-07-S06-8-1-R4",
-      "title": "Radioactivity Part 3 \u00b7 Kick 1",
+      "title": "Radioactivity Part 3 · Kick 1",
       "name": "VERSE 3",
       "bar": 0,
       "bars": 1,
@@ -3676,7 +3676,7 @@
     {
       "source": "bb1_songs",
       "id": "LIB-DPC-07-S06-8-1-R5",
-      "title": "Radioactivity Part 3 \u00b7 Kick 2",
+      "title": "Radioactivity Part 3 · Kick 2",
       "name": "CHORUS",
       "bar": 0,
       "bars": 1,
@@ -3691,7 +3691,7 @@
     {
       "source": "bb1_songs",
       "id": "LIB-DPC-07-S06-8-1-R6",
-      "title": "Radioactivity Part 3 \u00b7 Kick 3",
+      "title": "Radioactivity Part 3 · Kick 3",
       "name": "VERSE 4",
       "bar": 0,
       "bars": 1,
@@ -7734,7 +7734,7 @@
     {
       "source": "bb1_songs",
       "id": "BBSONG-PROBLEMESD-01",
-      "title": "Proble\u0300mes D'Amour Part1",
+      "title": "Problèmes D'Amour Part1",
       "name": "VERSE 1 A",
       "bar": 0,
       "bars": 2,
@@ -7749,7 +7749,7 @@
     {
       "source": "bb1_songs",
       "id": "BBSONG-PROBLEMESD-01",
-      "title": "Proble\u0300mes D'Amour Part1",
+      "title": "Problèmes D'Amour Part1",
       "name": "VERSE 1 B",
       "bar": 1,
       "bars": 2,
@@ -7764,7 +7764,7 @@
     {
       "source": "bb1_songs",
       "id": "BBSONG-PROBLEMESD-02",
-      "title": "Proble\u0300mes D'Amour Part2A",
+      "title": "Problèmes D'Amour Part2A",
       "name": "VERSE 2 A",
       "bar": 0,
       "bars": 2,
@@ -7779,7 +7779,7 @@
     {
       "source": "bb1_songs",
       "id": "BBSONG-PROBLEMESD-02",
-      "title": "Proble\u0300mes D'Amour Part2A",
+      "title": "Problèmes D'Amour Part2A",
       "name": "VERSE 2 B",
       "bar": 1,
       "bars": 2,
@@ -7794,7 +7794,7 @@
     {
       "source": "bb1_songs",
       "id": "BBSONG-PROBLEMESD-03",
-      "title": "Proble\u0300mes D'Amour Part2B",
+      "title": "Problèmes D'Amour Part2B",
       "name": "CHORUS A",
       "bar": 0,
       "bars": 2,
@@ -7809,7 +7809,7 @@
     {
       "source": "bb1_songs",
       "id": "BBSONG-PROBLEMESD-03",
-      "title": "Proble\u0300mes D'Amour Part2B",
+      "title": "Problèmes D'Amour Part2B",
       "name": "CHORUS B",
       "bar": 1,
       "bars": 2,
@@ -9244,7 +9244,7 @@
     {
       "source": "bb1_songs",
       "id": "BBSONG-040-01",
-      "title": "Oxyge\u0300ne (Part IV) Part 1",
+      "title": "Oxygène (Part IV) Part 1",
       "name": "GROOVE A",
       "bar": 0,
       "bars": 2,
@@ -9268,7 +9268,7 @@
     {
       "source": "bb1_songs",
       "id": "BBSONG-040-01",
-      "title": "Oxyge\u0300ne (Part IV) Part 1",
+      "title": "Oxygène (Part IV) Part 1",
       "name": "GROOVE B",
       "bar": 1,
       "bars": 2,
@@ -18612,7 +18612,7 @@
       "display_name": "PACIFIC STATE"
     },
     {
-      "name": "Proble\u0300mes D'Amour",
+      "name": "Problèmes D'Amour",
       "tempo": 121,
       "swing_x2": 100,
       "dillo": {
@@ -18629,7 +18629,7 @@
       },
       "telegram": {
         "id": "planet-rock-strings",
-        "name": "Proble\u0300mes D'Amour",
+        "name": "Problèmes D'Amour",
         "member": "BB1 catalogue.json",
         "source_category": "Band",
         "values": {
@@ -20145,7 +20145,7 @@
       "display_name": "FUNKY DRUMMER"
     },
     {
-      "name": "Oxyge\u0300ne (Part IV)",
+      "name": "Oxygène (Part IV)",
       "tempo": 126,
       "swing_x2": 100,
       "dillo": {
@@ -20162,7 +20162,7 @@
       },
       "telegram": {
         "id": "planet-rock-strings",
-        "name": "Oxyge\u0300ne (Part IV)",
+        "name": "Oxygène (Part IV)",
         "member": "BB1 catalogue.json",
         "source_category": "Band",
         "values": {

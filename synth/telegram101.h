@@ -165,7 +165,30 @@ typedef struct {
     /* Nonzero: the output level to use in place of controls.master (0-127). In the Band, the master
      * belongs to the whole mix, so Telegram's own engine runs at a fixed level. */
     uint8_t fixed_master;
+    uint8_t smoothing_settled, settled_values[TG_PARAMETERS];
 } tg_voice;
+
+/* What the voice is doing now, for a display. Read after a render; nothing in the render path
+ * writes it and the audio is unchanged by reading it. Positions are the filter's own normalized
+ * cutoff position (0 closed, 255 fully open) before LFO, wheel and bend. */
+typedef struct {
+    uint8_t gate;          /* a note is held (or the phrase/arp is holding one) */
+    uint8_t active;        /* gate, or an envelope that has not finished falling */
+    uint8_t stage;         /* TG_LIVE_ATTACK, TG_LIVE_DECAY (settles on sustain), TG_LIVE_RELEASE */
+    uint8_t level;         /* the stage's envelope, 0..255 */
+    uint8_t filter_stage;  /* the filter's own envelope when it has one, else the same as stage */
+    uint8_t filter_level;
+    uint8_t cutoff_set;    /* where the CUTOFF control puts the filter */
+    uint8_t cutoff_now;    /* where the envelope, key tracking and accent have moved it */
+} tg_live;
+enum { TG_LIVE_ATTACK, TG_LIVE_DECAY, TG_LIVE_RELEASE };
+void tg_live_read(const tg_voice *, tg_live *);
+/* The envelope can move the filter this far from cutoff_set (same 0..255 units, signed; negative
+ * when the filter envelope closes). From the stored patch alone, so it is true with no note held. */
+int tg_filter_env_reach(const tg_patch *);
+/* The engine's own time law for a stage control (0 attack, 1 decay, 3 release), in milliseconds.
+ * Attack is time to peak; decay and release are the full-level fall to 5%. */
+unsigned tg_stage_ms(unsigned stage, unsigned value);
 
 unsigned tg_pattern_length(const tg_controls *);
 

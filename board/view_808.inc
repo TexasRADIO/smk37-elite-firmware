@@ -223,7 +223,7 @@ static void view_drum_presets(uint16_t *pixels, const struct panel *panel, unsig
     if (!selected) return;
     unsigned index = selected - 1u;
 
-    if (rhythm_cue_waiting(panel)) {
+    if (rhythm_cue_waiting(panel) && panel->rhythm_source != RHYTHM_LAYER) {
         /* Counted in: the name, four big beats, nothing else. */
         unsigned waiting = rhythm_pending(panel);
         char caps[32];
@@ -299,6 +299,16 @@ static void view_drum_presets(uint16_t *pixels, const struct panel *panel, unsig
             }
         }
         jukebox_lanes(pixels, panel, index, 126, band);
+#ifdef ELITE_PERCUSSION_727
+        if (panel->rhythm_source == RHYTHM_LAYER) {
+            const char *state = !layer_on(panel) ? "OFF" :
+                rhythm_cue_waiting(panel) ? (panel->layer_combo ? "NEXT+" : "NEXT") :
+                panel->layer_combo ? "NOW+" : "NOW";
+            int x = view_small(pixels, 8, 169, state, accent) + 8;
+            if (layer_on(panel))
+                view_small(pixels, x, 169, layer_name(panel), ink);
+        }
+#endif
         return;
     }
 
@@ -415,6 +425,8 @@ static void view_instruments(uint16_t *pixels, const struct panel *panel)
     unsigned rows = PICK_COUNT;
 #if ELITE_DRUM_PARTS == 1 && defined(ELITE_PERCUSSION_727)
     if (panel->layer_available) rows++; /* pad 5: the 727 layer */
+    if (panel->instruments_return == PAGE_DRUM_PRESETS && panel->rhythm_source == RHYTHM_LAYER)
+        now = PICK_COUNT;
 #endif
     const int row = rows <= 4 ? 40 : 32;
     const picnic_face *face = rows <= 4 ? &picnic_L : &picnic_M;
@@ -424,6 +436,8 @@ static void view_instruments(uint16_t *pixels, const struct panel *panel)
             view_rect(pixels, 8, y + 2, 32, row - 6, CORAL);
             view_picnic(pixels, 24 - view_picnic_width("5", &picnic_M) / 2, y + (row - 6) / 2 - 7, "5", &picnic_M, CHROME_BAND);
             view_picnic(pixels, 48, y + 6, "727 LAYER", face, CHROME_CREAM);
+            if (i == now)
+                view_rect(pixels, VIEW_W - 8, y + 2, 4, row - 6, CORAL);
             continue;
         }
         uint16_t box = lane[i];
@@ -452,6 +466,7 @@ static void view_globe_map(uint16_t *pixels, const struct panel *panel)
     unsigned n = 0;
 #define GLOBE_ROW(k, d) do { key[n] = k; does[n] = d; n++; } while (0)
     GLOBE_ROW("KNOB BANK", panel->conductor_dillo_keys ? "KEYS TO TELEGRAM" : "KEYS TO DILLO");
+    if (panel->page == PAGE_CONDUCTOR) GLOBE_ROW("BT", "INSTRUMENTS");
     if (panel->page == PAGE_CONDUCTOR || panel->page == PAGE_SCENES) {
         GLOBE_ROW("PARA", "SETUPS");
         if (ELITE_DRUM_PARTS > 1) GLOBE_ROW("FX", drum_part(panel) ? "EDIT 808 A" : "EDIT 808 B");

@@ -133,6 +133,7 @@ struct panel {
     uint32_t held_buttons, view_frames, strip_frame; /* Redesign strip: modifiers held, last knob turned. */
     uint32_t globe_frame; /* when GLOBE went down: a long hold draws the shift map */
     uint8_t strip_knob;
+    uint8_t motion_state, motion_target; /* a recorded knob movement on the working sound (see MOTION) */
     uint8_t main_notice; /* MAIN just moved: the header shows its value, from any page */
     uint16_t band_last;  /* the Band part loaded last (index + 1): the Band arrows step its song */
     uint8_t band_hold_pad; /* Band pad held (pad + 1): held long, it opens that instrument */
@@ -140,10 +141,12 @@ struct panel {
     uint8_t band_layer;  /* Band K4: 0 off, else the 727 layer rhythm playing over the song */
     uint8_t layer_mix[8]; /* 727 page: bombo, guiro, campana, bongos, congas, timbales, -, level; 100 unity */
     uint8_t layer_combo, layer_last_pad; /* a second rhythm combined CR-8000 style (index + 1) */
-    uint32_t layer_last_frame;
     uint32_t main_notice_frame;
     uint32_t band_guard_frame; /* when a launch was held back to protect a waiting draft */
-    uint8_t band_guard, flash_kept; /* guard armed; the last launch kept edits as drafts */
+    uint8_t band_guard, flash_kept, sound_guard; /* sound_guard: a sound change held back to protect edits */
+    uint8_t sound_browse; /* Pending Telegram factory sound, plus one; zero means the keys still own the cursor. */
+    uint32_t sound_guard_frame, sound_browse_frame;
+    uint8_t seen_page, from_band; /* a Telegram page opened from the Band returns there on BT */
     uint8_t scene_cleanup;
     conductor_assets scene_cleanup_assets;
     uint32_t conductor_edits, conductor_save_edits;
@@ -188,8 +191,8 @@ static int knob_fine(int delta)
 static int knob_speed(int delta)
 {
     if (!knob_speed_on) return delta;
-    /* A slow click moves 3, a quick spin up to
-     * 6 per click, so 0-127 is under two turns slowly and well under one at speed. */
+     
+
     int a = delta < 0 ? -delta : delta;
     int per = a <= 1 ? 3 : a == 2 ? 4 : a == 3 ? 5 : 6;
     return delta * per;
@@ -198,7 +201,7 @@ static int knob_speed(int delta)
 #define STARTUP_STEPS {36, 0, 48, 36 | TG_TIE, 43, 0, 36, 0, 36, 48, 0, 43, 39, 0, 46, 0}
 
 #ifdef ELITE_DRUMS808
-enum { HOME_PAGE = PAGE_CONDUCTOR };
+enum { HOME_PAGE = PAGE_TONE };  
 enum { EDITOR_LAST = 1, EDITOR_A, EDITOR_B, EDITOR_DILLO, EDITOR_TELEGRAM };
 enum { FOCUS_CHORD_KEYS = 1, FOCUS_CHORD_DRUMS };
 enum { DRUM_LATCH_A = 1, DRUM_LATCH_B = 2, DRUM_LATCH_BOTH = DRUM_LATCH_A | DRUM_LATCH_B };
@@ -493,6 +496,9 @@ static unsigned conductor_has_pattern(const struct panel *panel, unsigned lane, 
 }
 
 /* Loading a pattern is independent of arming its lane or changing panel focus. */
+#ifdef ELITE_PERCUSSION_727
+static void layer_identify_pattern(struct panel *panel);
+#endif
 static void conductor_replace_pattern(struct panel *panel, unsigned lane, unsigned slot, const void *pattern)
 {
     /* A later lane request changes the section without dropping its other cues. */
@@ -511,6 +517,9 @@ static void conductor_replace_pattern(struct panel *panel, unsigned lane, unsign
         break;
     case MIX_808_B:
         panel->drums_b.pattern = *(const drum_pattern *)pattern;
+#ifdef ELITE_PERCUSSION_727
+        layer_identify_pattern(panel);
+#endif
         panel->drums_b_initialized = 1;
         panel->drums_b.slot = (uint8_t)slot;
         conductor_forget_drum_undo(panel, 1);
@@ -882,6 +891,7 @@ static unsigned conductor_cancel_pending(struct panel *panel, conductor_patterns
         panel->drums_b.cue = request->drums_b.cue = active->drums_b.cue;
 #ifdef ELITE_PERCUSSION_727
         panel->drums_b.percussion_kit = request->drums_b.percussion_kit = active->drums_b.percussion_kit;
+        layer_identify_pattern(panel);
 #endif
         request->drum_init = (request->drum_init & ~2u) | (active->drum_init & 2u);
         panel->drums_b_initialized = (active->drum_init >> 1) & 1u;
@@ -1194,21 +1204,36 @@ static void focus_control(struct panel *panel, unsigned control, unsigned slot,
 static uint8_t home_armed;
 #ifdef ELITE_DRUMS808
 static int library_back(struct panel *panel);
+
+/* A plain BT tap returns to the caller of a Telegram editor. */
+static unsigned bt_destination(const struct panel *panel, unsigned globe)
+{
+    if (panel->page == PAGE_INSTRUMENTS || panel->page == PAGE_ASSIGN)
+        return panel->instruments_return;
+    if (ELITE_DRUM_PARTS != 1) return PAGE_INSTRUMENTS;
+    if (panel->page == PAGE_CONDUCTOR) return globe ? PAGE_INSTRUMENTS : HOME_PAGE;
+    if (globe || panel->from_band) return PAGE_CONDUCTOR;
+    switch (panel->page) {
+    case PAGE_STEPS: case PAGE_MANUAL: case PAGE_FILTER_ENV:
+    case PAGE_FX: case PAGE_ARP: case PAGE_GLOBAL: return HOME_PAGE;
+    default: return PAGE_CONDUCTOR;
+    }
+}
 #endif
 
 static void home_navigation(struct panel *panel, uint32_t pressed, uint32_t buttons, uint32_t frames)
 {
     if (pressed & (1u << BTN_ASSIGN)) {
 #ifdef ELITE_DRUMS808
-        /* Library back takes priority. On the single-808 panel, BT returns
-         * to Band and a tap on Band opens the instrument picker. */
         if (library_back(panel)) {
             if (ELITE_DRUM_PARTS == 1) panel->instruments_return = panel->page;
-        }
-        else if (panel->page == PAGE_INSTRUMENTS || panel->page == PAGE_ASSIGN) panel->page = panel->instruments_return;
-        else {
-            panel->instruments_return = panel->page;
-            panel->page = ELITE_DRUM_PARTS == 1 && panel->page != PAGE_CONDUCTOR ? PAGE_CONDUCTOR : PAGE_INSTRUMENTS;
+        } else {
+            unsigned destination = bt_destination(panel, buttons & (1u << BTN_GLOBE));
+            if (panel->page != PAGE_ASSIGN && panel->page != PAGE_INSTRUMENTS &&
+                (destination == PAGE_INSTRUMENTS || destination == PAGE_CONDUCTOR))
+                panel->instruments_return = panel->page;
+            panel->page = destination;
+            if (buttons & (1u << BTN_GLOBE)) panel->globe_tap_pending = 0;
         }
 #else
         panel->page = HOME_PAGE;
@@ -1331,6 +1356,117 @@ static void remember_patch(struct panel *panel, const struct patch_snapshot *pre
         return;
     panel->alternate_patch = *previous;
     panel->compare_available = 1;
+}
+
+/* Telegram 101 first. A sound change on home would throw away an edited sound, so the first gesture
+ * only says so; a second gesture within three seconds goes ahead. */
+enum { SOUND_GUARD_FRAMES = 1875, SOUND_GUARD_REST = 190 }; /* 3 s and 0.3 s at 625 frames a second */
+static unsigned panel_sound_edited(const struct panel *panel);
+static unsigned telegram_sound_guarded(struct panel *panel, unsigned knob)
+{
+#ifdef ELITE_DRUMS808
+    if (!panel_sound_edited(panel)) return 0;
+    uint32_t waited = fm1_in.frames - panel->sound_guard_frame;
+    /* A knob must rest before it counts as a second turn, or one spin would run straight through. */
+    if (panel->sound_guard && waited < SOUND_GUARD_FRAMES && (!knob || waited >= SOUND_GUARD_REST)) {
+        panel->sound_guard = 0;
+        return 0;
+    }
+    panel->sound_guard = (uint8_t)(1u + knob);
+    panel->sound_guard_frame = fm1_in.frames;
+    panel->main_notice = 6;
+    panel->main_notice_frame = fm1_in.frames;
+    return 1;
+#else
+    (void)panel; (void)knob;
+    return 0;
+#endif
+}
+
+static unsigned telegram_browse_target(const struct panel *panel)
+{
+#ifdef ELITE_DRUMS808
+    return panel->sound_browse ? panel->sound_browse - 1u : panel->preset;
+#else
+    return panel->preset;
+#endif
+}
+
+static void telegram_cancel_browse(struct panel *panel)
+{
+#ifdef ELITE_DRUMS808
+    panel->sound_browse = 0;
+    if (panel->main_notice == 7) panel->main_notice = 0;
+#else
+    (void)panel;
+#endif
+}
+
+/* Pads and arrows keep their established immediate action. K7 and K8 use the staged browser below. */
+static void telegram_browse(struct panel *panel, int step, unsigned knob)
+{
+    telegram_cancel_browse(panel);
+    if (telegram_sound_guarded(panel, knob)) return;
+    struct patch_snapshot previous = snapshot_patch(panel);
+    int next = ((int)panel->preset + step) % (int)TG_PRESETS;
+    select_preset(panel, (unsigned)(next < 0 ? next + (int)TG_PRESETS : next));
+    remember_patch(panel, &previous);
+#ifdef ELITE_DRUMS808
+    panel->main_notice = step >= (int)TG_PADS || step <= -(int)TG_PADS ? 5 : 0; /* a bank's name, big */
+    panel->main_notice_frame = fm1_in.frames;
+#endif
+}
+
+/* A turning encoder moves a visible cursor, but does not churn the voice on every detent. Once the
+ * encoder rests, the selected sound is loaded once and the previous sound remains available to compare. */
+static void telegram_stage_browse(struct panel *panel, int step)
+{
+#ifdef ELITE_DRUMS808
+    if (!panel->sound_browse && telegram_sound_guarded(panel, 1)) return;
+    int next = ((int)telegram_browse_target(panel) + step) % (int)TG_PRESETS;
+    panel->sound_browse = (uint8_t)(1u + (unsigned)(next < 0 ? next + (int)TG_PRESETS : next));
+    panel->sound_browse_frame = fm1_in.frames;
+    panel->main_notice = 7;
+    panel->main_notice_frame = fm1_in.frames;
+#else
+    telegram_browse(panel, step, 1);
+#endif
+}
+
+static void telegram_commit_browse(struct panel *panel)
+{
+#ifdef ELITE_DRUMS808
+    if (!panel->sound_browse) return;
+    unsigned next = telegram_browse_target(panel);
+    panel->sound_browse = 0;
+    struct patch_snapshot previous = snapshot_patch(panel);
+    select_preset(panel, next);
+    remember_patch(panel, &previous);
+    panel->sound_guard = 0;
+    panel->main_notice = 7; /* The same card changes from SELECT to NOW. */
+    panel->main_notice_frame = fm1_in.frames;
+#else
+    (void)panel;
+#endif
+}
+
+static void telegram_bank_step(struct panel *panel, int arrow)
+{
+    telegram_browse(panel, arrow > 0 ? (int)TG_PADS : -(int)TG_PADS, 0);
+}
+
+/* Home's two browsing knobs, as on SHRUB: K7 steps the sounds and K8 steps the banks. They take
+ * the Tone page's LFO RATE and GLIDE slots; LFO RATE stays on the Modulator faders and GLIDE on the
+ * second knob page and FX. MAIN stays on K1. A knob the player has reassigned stays theirs. */
+static unsigned telegram_home_knob(const struct panel *panel, unsigned k)
+{
+#ifdef ELITE_DRUMS808
+    return panel->page == PAGE_TONE && !panel->knob_bank && (k == 6 || k == 7) &&
+           panel->knob_map[0][k] == tg_default_knob_map[0][k];
+#else
+    (void)panel; (void)k;
+    return 0;
+#endif
 }
 
 static void compare_patch(struct panel *panel)
@@ -1973,24 +2109,56 @@ static void conductor_duet_pad(struct panel *panel, unsigned pad, unsigned keep_
  * LATIN layer rhythms (B's transport, LATIN row order) and the BB1 Band presets (all
  * three parts at the downbeat). A Band page never mixes two song or era groups. */
 enum { RHYTHM_STUDIO, RHYTHM_LAYER, RHYTHM_BAND };
-enum { LAYER_CHORD_FRAMES = 190, LAYER_GROUPS = 6 }; /* pads within 0.3 s combine */
+enum { LAYER_GROUPS = 6 };
 /* The 727's eleven tracks in six knob groups: bombo, guiro, campana, bongos, congas, timbales. */
 static const uint8_t layer_track_group[11] = {0, 1, 2, 4, 3, 3, 4, 4, 4, 5, 5};
 static const char *const layer_group_name[8] = {"BOMB", "GUIR", "CAMP", "BONG", "CONG", "TIMB", 0, "LVL"};
 #ifdef ELITE_PERCUSSION_727
 #include "layer_rhythms.inc"
 
-/* K4 on the Band and on the song list: the 727 layer, one name per click, OFF first. It plays over
+static unsigned layer_pattern_number(const drum_pattern *pattern)
+{
+    for (unsigned i = 0; i < LAYER_RHYTHM_COUNT; i++)
+        if (!memcmp(pattern, &layer_rhythms[i], sizeof *pattern)) return i + 1u;
+    return 0;
+}
+
+static void layer_identify_pattern(struct panel *panel)
+{
+    panel->band_layer = (uint8_t)layer_pattern_number(&panel->drums_b.pattern);
+    panel->layer_combo = 0;
+    panel->layer_last_pad = DRUM_PRESET_PAGE;
+}
+
+static unsigned layer_on(const struct panel *panel)
+{
+    return panel->drums_b.enabled && !panel->drums_b.muted;
+}
+
+static const char *layer_name(const struct panel *panel)
+{
+    if (!layer_on(panel)) return "OFF";
+    return panel->band_layer ? layer_rhythm_names[panel->band_layer - 1u] : "CUSTOM";
+}
+
+/* K4 on Band/SONGS, K7 on the layer page: one name per click, OFF first. It plays over
  * whatever is running and does not touch the other parts. */
 static void band_layer_turn(struct panel *panel, int delta)
 {
     if (!panel->layer_available) return;
     int next = bounded((int)panel->band_layer + (delta > 0 ? 1 : -1), 0, LAYER_RHYTHM_COUNT);
-    if (next == panel->band_layer) return;
+    if (next == panel->band_layer && (next || !layer_on(panel))) return;
     panel->band_layer = (uint8_t)next;
+    panel->layer_combo = 0;
+    panel->layer_last_pad = DRUM_PRESET_PAGE;
     if (next) {
         conductor_cue_layer_rhythm(panel, &layer_rhythms[next - 1]);
+        panel->band_layer = (uint8_t)next;
         panel->drums_b.muted = 0;
+        if (panel->page == PAGE_DRUM_PRESETS && panel->rhythm_source == RHYTHM_LAYER) {
+            panel->drum_preset_bank = (uint8_t)((next - 1) / DRUM_PRESET_PAGE);
+            panel->rhythm_cursor = (uint8_t)((next - 1) % DRUM_PRESET_PAGE);
+        }
     } else {
         panel->drums_b.muted = 1;
     }
@@ -2176,9 +2344,7 @@ static unsigned rhythm_playing(const struct panel *panel)
     switch (panel->rhythm_source) {
 #ifdef ELITE_PERCUSSION_727
     case RHYTHM_LAYER:
-        for (unsigned i = 0; i < LAYER_RHYTHM_COUNT; i++)
-            if (!memcmp(&panel->drums_b.pattern, &layer_rhythms[i], sizeof layer_rhythms[i])) return i + 1u;
-        return 0;
+        return layer_pattern_number(&panel->drums_b.pattern);
 #endif
 #ifdef ELITE_BAND_PRESETS
     case RHYTHM_BAND: return panel->band_preset ? panel->band_preset : panel->band_sound;
@@ -2187,9 +2353,12 @@ static unsigned rhythm_playing(const struct panel *panel)
     }
 }
 
-/* Waiting for the downbeat (Band only), plus one. */
+/* Waiting for the downbeat, plus one. */
 static unsigned rhythm_pending(const struct panel *panel)
 {
+#ifdef ELITE_PERCUSSION_727
+    if (panel->rhythm_source == RHYTHM_LAYER) return panel->band_layer;
+#endif
 #ifdef ELITE_BAND_PRESETS
     if (panel->rhythm_source == RHYTHM_BAND) return panel->band_preset;
 #else
@@ -2202,6 +2371,13 @@ static void open_rhythms(struct panel *panel, unsigned source)
 {
     panel->rhythm_source = (uint8_t)source;
     unsigned playing = rhythm_playing(panel);
+#ifdef ELITE_PERCUSSION_727
+    if (source == RHYTHM_LAYER) {
+        /* A combined rhythm has no exact factory-pattern match. Reopen its chosen name. */
+        if (panel->band_layer && panel->band_layer <= LAYER_RHYTHM_COUNT) playing = panel->band_layer;
+        panel->layer_last_pad = DRUM_PRESET_PAGE; /* re-entering is not a two-pad chord */
+    }
+#endif
     panel->drum_preset_bank = 0;
 #ifdef ELITE_BAND_PRESETS
     if (source == RHYTHM_BAND) {
@@ -2225,7 +2401,7 @@ static void rhythm_pad(struct panel *panel, unsigned pad)
     case RHYTHM_LAYER: {
         /* Two pads together combine, as on the CR-8000: the hits of both rhythms play as one. */
         unsigned other = panel->layer_last_pad < DRUM_PRESET_PAGE && panel->layer_last_pad != pad &&
-                         fm1_in.frames - panel->layer_last_frame < LAYER_CHORD_FRAMES ?
+                         rhythm_at(panel, panel->layer_last_pad) == panel->band_layer ?
                          rhythm_at(panel, panel->layer_last_pad) : 0;
         if (other && other != index) {
             drum_pattern both = layer_rhythms[index - 1u];
@@ -2240,7 +2416,7 @@ static void rhythm_pad(struct panel *panel, unsigned pad)
             panel->layer_combo = 0;
         }
         panel->layer_last_pad = (uint8_t)pad;
-        panel->layer_last_frame = fm1_in.frames;
+
         panel->band_layer = (uint8_t)index; /* Band K4 follows */
         panel->drums_b.muted = 0;
         break;
@@ -2257,7 +2433,8 @@ static void rhythm_pad(struct panel *panel, unsigned pad)
     default: conductor_drum_preset_pad(panel, pad); break;
     }
     panel->rhythm_cursor = (uint8_t)pad;
-    panel->rhythm_info = 1; /* It lands on what it is. */
+    if (panel->rhythm_source != RHYTHM_LAYER)
+        panel->rhythm_info = 1; /* The layer stays in the player's chosen performance view. */
 }
 
 /* ---- Preset jukebox: K1 spins one entry at a time across pages; PARA (INFO) turns the
@@ -3618,6 +3795,191 @@ static void conductor_mixer_knobs(struct panel *panel)
 }
 #endif
 
+#ifdef ELITE_DRUMS808
+/* ---------- MOTION: one recorded knob movement, on the sound ----------
+ * Turn a sound knob, press REC, turn it again: one bar of that movement is recorded and loops.
+ * It belongs to the working sound: it keeps playing through pattern and section changes, and it
+ * is dropped when another sound is loaded. The stored control keeps its own value throughout (the
+ * movement is kept as offsets from it), so turning the knob afterwards moves the whole gesture up
+ * or down, and REC removes the movement in one step with the sound exactly as it was.
+ *
+ * The movement lives in working memory only: it is not saved with the sound or a setup.
+ * It reaches the voices the way a hand on the knob does, through the published controls; nothing
+ * is added to the audio path. */
+enum { MOTION_OFF, MOTION_ARMED, MOTION_RECORDING, MOTION_PLAYING };
+enum { MOTION_POINTS = 32, MOTION_SPAN = MOTION_POINTS * 256,
+       MOTION_ARM_FRAMES = 6250, MOTION_OUT_FRAMES = 5 }; /* armed for 10 s; output about 125 times a second */
+struct motion_owner {
+    uint16_t imported_slot, band_sound, studio_sound;
+    uint8_t preset, user_slot, user_sound, imported_sound, scene_sound, startup_sound;
+};
+static struct {
+    int8_t offset[MOTION_POINTS]; /* the movement, relative to the control's own value */
+    struct motion_owner owner;
+    uint32_t last_frames, armed_frames, out_frames, refresh_frames, remainder;
+    uint16_t position, travelled; /* Q8 points round the bar; how much of the bar has been recorded */
+    int16_t base;                 /* the control's value when recording began */
+    uint8_t last_step, effective, turned_target, turned_page, start_point;
+    uint32_t turned_frames;
+} motion;
+
+static struct motion_owner motion_owner_now(const struct panel *panel)
+{
+    struct motion_owner owner;
+    memset(&owner, 0, sizeof owner);
+    owner.imported_slot = panel->imported_slot; owner.preset = panel->preset; owner.user_slot = panel->user_slot;
+    owner.user_sound = panel->user_sound; owner.imported_sound = panel->imported_sound; owner.scene_sound = panel->scene_sound;
+    owner.startup_sound = panel->startup_sound;
+#ifdef ELITE_BAND_PRESETS
+    owner.band_sound = panel->band_sound; owner.studio_sound = panel->studio_sound;
+#endif
+    return owner;
+}
+
+/* A target is a Telegram sound control (tg_parameter) plus one. Dillo's sound page is left out: REC
+ * there saves the sound, and a save must never be mistaken for a recording. */
+static unsigned motion_range(unsigned target) { (void)target; return 127u; }
+
+static unsigned motion_get(const struct panel *panel, unsigned target)
+{
+    return panel->sound.patch.value[target - 1u];
+}
+
+static void motion_set(struct panel *panel, unsigned target, unsigned value)
+{
+    panel->sound.patch.value[target - 1u] = (uint8_t)value;
+}
+
+static void motion_stop(struct panel *panel)
+{
+    if (panel->motion_state == MOTION_RECORDING) motion_set(panel, panel->motion_target, (unsigned)motion.base);
+    panel->motion_state = MOTION_OFF;
+    panel->motion_target = 0;
+}
+
+/* The value the voice should have now: the control's own value plus the movement at this point. */
+static unsigned motion_at(const struct panel *panel, unsigned position)
+{
+    unsigned point = position >> 8, part = position & 255u;
+    int a = motion.offset[point % MOTION_POINTS], b = motion.offset[(point + 1u) % MOTION_POINTS];
+    int value = (int)motion_get(panel, panel->motion_target) + a + ((b - a) * (int)part) / 256;
+    return (unsigned)bounded(value, 0, (int)motion_range(panel->motion_target));
+}
+
+/* A sound knob was turned. `before` is its value before this turn. */
+static void motion_turned(struct panel *panel, unsigned target, unsigned before, uint32_t frames)
+{
+    motion.turned_target = (uint8_t)target;
+    motion.turned_page = panel->page;
+    motion.turned_frames = frames;
+    if (panel->motion_state != MOTION_ARMED || panel->motion_target != target) return;
+    memset(motion.offset, 0, sizeof motion.offset);
+    motion.base = (int16_t)before;
+    motion.travelled = 0;
+    motion.start_point = (uint8_t)(motion.position >> 8);
+    motion.owner = motion_owner_now(panel);
+    panel->motion_state = MOTION_RECORDING;
+}
+
+/* REC with a sound knob just turned belongs to the movement. Returns 1 when it used the press. */
+static unsigned motion_rec(struct panel *panel, uint32_t frames)
+{
+    if ((panel->motion_state == MOTION_ARMED || panel->motion_state == MOTION_RECORDING) && panel->page == motion.turned_page) {
+        motion_stop(panel);                                   /* cancel: nothing kept */
+        return 1;
+    }
+    /* Only on the page where the knob was turned, while its card is up: elsewhere REC keeps its own meaning. */
+    unsigned recent = motion.turned_target && motion.turned_page == panel->page &&
+                      (uint32_t)(frames - motion.turned_frames) < CONTROL_FOCUS_FRAMES ? motion.turned_target : 0;
+    if (!recent) return 0;
+    if (panel->motion_state == MOTION_PLAYING && panel->motion_target == recent) {
+        motion_stop(panel);                                   /* one step: the movement is gone, the sound as it was */
+        return 1;
+    }
+    motion_stop(panel);                                       /* one movement at a time: a new one replaces the old */
+    panel->motion_state = MOTION_ARMED;
+    panel->motion_target = (uint8_t)recent;
+    motion.armed_frames = frames;
+    return 1;
+}
+
+static unsigned motion_bar_frames(const tg_controls *sound)
+{
+    /* A bar of four beats in panel frames (625 a second): from the clock's pulse when following USB. */
+    if (sound->clock.source == TG_CLOCK_USB && sound->clock.period_us)
+        return (unsigned)bounded((int)(sound->clock.period_us * 96u / 1600u), 200, 20000);
+    return 625u * 240u / (sound->tempo ? sound->tempo : 120u);
+}
+
+/* Once a pass of the main loop. bar_step is the sixteenth of the bar being played, or 16 when the
+ * transport is stopped (the movement then runs on the tempo alone). */
+static void motion_clock(struct panel *panel, unsigned bar_step, uint32_t frames)
+{
+    uint32_t elapsed = frames - motion.last_frames;
+    motion.last_frames = frames;
+    if (!panel->motion_state) { motion.last_step = (uint8_t)bar_step; return; }
+    if (panel->motion_state != MOTION_PLAYING && panel->page != motion.turned_page) {
+        motion_stop(panel);                                   /* left the page before it was recorded: nothing kept */
+        return;
+    }
+    if (panel->motion_state == MOTION_ARMED) {
+        if ((uint32_t)(frames - motion.armed_frames) >= MOTION_ARM_FRAMES) motion_stop(panel);
+    } else {
+        struct motion_owner owner = motion_owner_now(panel);
+        if (memcmp(&owner, &motion.owner, sizeof owner)) {    /* another sound was loaded: the movement was this sound's */
+            panel->motion_state = MOTION_OFF;
+            panel->motion_target = 0;
+            return;
+        }
+    }
+    if (elapsed > 625u) elapsed = 0;                          /* a long pause is not a movement */
+    unsigned old = motion.position, bar = motion_bar_frames(&panel->sound);
+    uint32_t owed = elapsed * (uint32_t)MOTION_SPAN + motion.remainder; /* carry the fraction: no drift against the tempo */
+    unsigned advance = (unsigned)(owed / bar);
+    motion.remainder = owed % bar;
+    unsigned position;
+    if (bar_step < 16u && bar_step != motion.last_step)
+        position = bar_step * (MOTION_SPAN / 16u);            /* a new sixteenth: take the transport's own position */
+    else
+        position = (old + advance) % MOTION_SPAN;             /* between steps, and when stopped: the tempo carries it */
+    motion.last_step = (uint8_t)bar_step;
+    motion.position = (uint16_t)position;
+    unsigned moved = (position + MOTION_SPAN - old) % MOTION_SPAN;
+    if (moved > MOTION_SPAN / 2u && bar_step < 16u) moved = 0; /* snapped back a hair: nothing new was passed */
+    if (panel->motion_state == MOTION_RECORDING) {
+        int offset = bounded((int)motion_get(panel, panel->motion_target) - motion.base, -127, 127);
+        for (unsigned point = old >> 8, n = 0; n < MOTION_POINTS; n++, point++) { /* every point passed takes the hand's position */
+            unsigned at = point % MOTION_POINTS;
+            if (at == motion.start_point && (n || motion.travelled > MOTION_SPAN / 2u)) break; /* round the bar: the first point keeps its start */
+            if (moved || !n) motion.offset[at] = (int8_t)offset;
+            if (at == position >> 8) break;
+        }
+        motion.travelled = (uint16_t)(motion.travelled + moved > MOTION_SPAN ? MOTION_SPAN : motion.travelled + moved);
+        if (motion.travelled >= MOTION_SPAN) {
+            motion_set(panel, panel->motion_target, (unsigned)motion.base); /* the control goes back to its own value */
+            panel->motion_state = MOTION_PLAYING;
+            motion.out_frames = frames - MOTION_OUT_FRAMES;
+        }
+    }
+    if (panel->motion_state == MOTION_PLAYING && (uint32_t)(frames - motion.out_frames) >= MOTION_OUT_FRAMES) {
+        motion.out_frames = frames;
+        motion.effective = (uint8_t)motion_at(panel, position);
+    }
+    /* While armed or recording the card stays open; refreshed twice a second, not every pass. */
+    if (panel->motion_state != MOTION_PLAYING && (uint32_t)(frames - motion.refresh_frames) >= 300u) {
+        motion.refresh_frames = frames;
+        if (panel->strip_knob && (uint32_t)(frames - panel->strip_frame) >= 300u) panel->strip_frame = frames - 150u;
+        motion.turned_frames = frames - 150u;
+    }
+}
+
+/* What the audio owner is given: the published controls with the movement laid over them. */
+static unsigned motion_plays(const struct panel *panel)
+{
+    return panel->motion_state == MOTION_PLAYING;
+}
+#endif
+
 static void read_controls_once(struct panel *panel, unsigned head);
 
 enum { MAIN_NOTICE_FRAMES = 750, BAND_HOLD_FRAMES = 375 }; /* 1.2 s; 0.6 s */
@@ -3630,6 +3992,12 @@ static void read_controls(struct panel *panel, unsigned head)
 #endif
     read_controls_once(panel, head);
 #ifdef ELITE_DRUMS808
+    /* Home browsing is preview-first. Leaving home cancels the preview; resting the knob commits it once. */
+    if (panel->sound_browse && (panel->page != PAGE_TONE || panel->knob_bank)) {
+        telegram_cancel_browse(panel);
+    } else if (panel->sound_browse && fm1_in.frames - panel->sound_browse_frame >= SOUND_GUARD_REST) {
+        telegram_commit_browse(panel);
+    }
     /* A Band pad held for 0.6 s opens its instrument: the part keeps the slot the tap cued. */
     if (panel->band_hold_pad && panel->page == PAGE_CONDUCTOR &&
         fm1_in.frames - panel->band_hold_frame >= BAND_HOLD_FRAMES) {
@@ -3689,6 +4057,13 @@ static void read_controls_once(struct panel *panel, unsigned head)
     unsigned cleared_step = 0, knob_focused = 0;
     int step_pitch_delta = 0;
     unsigned prior_page = panel->page;
+#ifdef ELITE_DRUMS808
+    if (panel->seen_page != panel->page) {
+        if (panel->seen_page == PAGE_CONDUCTOR) panel->from_band = 1;
+        if (panel->page == PAGE_TONE || panel->page == PAGE_CONDUCTOR || panel->seen_page == PAGE_TONE) panel->from_band = 0;
+        panel->seen_page = panel->page;
+    }
+#endif
 #ifdef ELITE_DILLO
     unsigned prior_dillo_record = panel->dillo_record;
     unsigned dillo_take_restored = 0, dillo_pad_command = 0;
@@ -3918,6 +4293,9 @@ static void read_controls_once(struct panel *panel, unsigned head)
                           (1u << BTN_PARA) | (1u << BTN_FX) | (1u << SMK_BTN_FADER_BANK) |
                           (1u << SMK_BTN_LEFT) | (1u << SMK_BTN_RIGHT);
 #ifdef ELITE_DRUMS808
+    /* MOTION: with a sound knob just turned, REC arms, cancels or removes its movement and does nothing else. */
+    if ((pressed & (1u << BTN_REC)) && !(pressed & navigation) && !(buttons & navigation) && motion_rec(panel, frames))
+        pressed &= ~(1u << BTN_REC);
     unsigned cleanup_edge = 0;
     unsigned draft_edge = 0, drum_undo_edge = 0;
     const uint32_t remove_chord = (1u << BTN_REC) | (1u << SMK_BTN_LEFT);
@@ -4037,7 +4415,17 @@ static void read_controls_once(struct panel *panel, unsigned head)
     if (panel->record) panel->hold = 0;
 
     int arrow = !!(pressed & (1u << SMK_BTN_RIGHT)) - !!(pressed & (1u << SMK_BTN_LEFT));
-    if (arrow && panel->page == PAGE_ASSIGN) {
+    if (arrow && globe_held && !panel->save_mode &&
+        (panel->page == PAGE_TONE || panel->page == PAGE_STEPS || panel->page == PAGE_MANUAL ||
+         panel->page == PAGE_FILTER_ENV || panel->page == PAGE_FX || panel->page == PAGE_ARP
+#ifdef ELITE_DRUMS808
+         || panel->page == PAGE_CONDUCTOR
+#endif
+        )) {
+        telegram_bank_step(panel, arrow); /* GLOBE + arrows: the 101's banks from any playing page */
+        panel->globe_tap_pending = 0;
+    }
+    else if (arrow && panel->page == PAGE_ASSIGN) {
         if (panel->assign_source == MAP_PAD) {
             uint8_t *note = &panel->pad_note[panel->assign_slot];
             *note = (uint8_t)bounded(*note + arrow, 12, 108);
@@ -4157,6 +4545,8 @@ static void read_controls_once(struct panel *panel, unsigned head)
     }
 #endif
 #endif
+    else if (arrow && panel->page == PAGE_TONE && !panel->repeat_edit)
+        telegram_bank_step(panel, arrow); /* home: the arrows turn the 101's sound banks */
     else if (arrow && panel->page != PAGE_FX && panel->page != PAGE_GLOBAL &&
              panel->page != PAGE_FILTER_ENV && panel->page != PAGE_ARP && panel->page != PAGE_KITS &&
              panel->page != PAGE_DRUM_PRESETS && panel->page != PAGE_INSTRUMENTS && panel->page != PAGE_SYNTH_PRESETS)
@@ -4197,14 +4587,18 @@ static void read_controls_once(struct panel *panel, unsigned head)
             fader_caught = 0;
         }
         else if (buttons & (1u << SMK_BTN_FADER_BANK)) sound->patch.amp_gate ^= 1u;
+        else if (panel->page == PAGE_MANUAL && panel->fader_bank == 0) {
+            sound->patch.sub_mode = (sound->patch.sub_mode + 1u) % 3u; /* the 101's sub switch, beside its slider */
+            fader_caught = 0;
+        }
         else if (panel->page == PAGE_FILTER_ENV || (panel->page == PAGE_MANUAL && panel->fader_bank == 1)) {
             panel->page = panel->page == PAGE_FILTER_ENV ? PAGE_MANUAL : PAGE_FILTER_ENV;
             fader_caught = 0;
         }
 #ifdef ELITE_DRUMS808
-        /* PARA mutes the instrument on screen: on Telegram's home and steps, its phrase. */
-        else if (panel->page == PAGE_TONE || panel->page == PAGE_STEPS)
-            conductor_toggle_pattern(panel, MIX_TELEGRAM);
+        /* Home: PARA trades the layer under the keys, the 101 and Dillo. On steps it mutes the phrase. */
+        else if (panel->page == PAGE_TONE) conductor_focus_keys(panel, !panel->conductor_dillo_keys, frames);
+        else if (panel->page == PAGE_STEPS) conductor_toggle_pattern(panel, MIX_TELEGRAM);
 #endif
         else sound->patch.trigger = (sound->patch.trigger + 1u) % 3u;
     }
@@ -4297,6 +4691,7 @@ static void read_controls_once(struct panel *panel, unsigned head)
 #ifdef ELITE_DRUMS808
         panel->strip_knob = (uint8_t)(k + 1u);
         panel->strip_frame = frames;
+        motion.turned_target = 0; /* set again below when this knob is a sound control that can be recorded */
 #endif
 #ifdef ELITE_DILLO
         if (panel->page == PAGE_DILLO) {
@@ -4363,7 +4758,8 @@ static void read_controls_once(struct panel *panel, unsigned head)
 #endif
 #ifdef ELITE_PERCUSSION_727
             if (panel->rhythm_source == RHYTHM_LAYER) {
-                /* The 727 page: one knob per instrument, as on the CR-78, and K8 the whole layer. */
+                /* K1-K6 mix groups, K7 chooses the rhythm, K8 mixes the whole layer. */
+                if (k == 6) { band_layer_turn(panel, delta); continue; }
                 if (k < LAYER_GROUPS || k == 7) {
                     unsigned next = (unsigned)bounded((int)panel->layer_mix[k] + knob_speed(delta), 0, 127);
                     if (next != panel->layer_mix[k]) {
@@ -4558,6 +4954,9 @@ static void read_controls_once(struct panel *panel, unsigned head)
                 panel->pedal_mode = (uint8_t)bounded(panel->pedal_mode + delta, PEDAL_OFF, PEDAL_HIGH);
             else if (k == 7)
                 panel->clock_out = delta > 0;
+        } else if (telegram_home_knob(panel, k)) {
+            telegram_stage_browse(panel, k == 7 ? delta * (int)TG_PADS : delta);
+            panel->focus_control = 0;
         } else if (k == 7 && panel->page == PAGE_MANUAL && panel->fader_bank == 0) {
             sound->patch.sub_mode = (uint8_t)bounded(sound->patch.sub_mode + delta, 0, 2);
             panel->focus_control = 0;
@@ -4593,7 +4992,13 @@ static void read_controls_once(struct panel *panel, unsigned head)
             int speed = control_switch(p) || control_five_positions(p) ? delta :
                         p == CTRL_TEMPO ? knob_fine(delta) : knob_speed(delta);
             if (knob_speed_on && speed != delta) stride = 1; /* knob_speed sets the pace on its own */
+#ifdef ELITE_DRUMS808
+            unsigned motion_before = p < TG_PARAMETERS ? sound->patch.value[p] : 0;
+#endif
             set_control(sound, p, (int)control_value(sound, p) + speed * (int)stride);
+#ifdef ELITE_DRUMS808
+            if (p < TG_PARAMETERS && performance_page(panel->page)) motion_turned(panel, p + 1u, motion_before, frames);
+#endif
             if (focus_allowed && (p != CTRL_TEMPO || sound->clock.source != TG_CLOCK_USB)) {
                 focus_control(panel, p, k, 0, 0, frames);
                 knob_focused = 1;
@@ -4712,6 +5117,9 @@ static void read_controls_once(struct panel *panel, unsigned head)
         if (event & 127) { panel->pad_hit = (uint8_t)(pad + 1u); panel->pad_hit_frame = panel->view_frames; }
 #endif
         if (!(event & 127)) {
+#ifdef ELITE_PERCUSSION_727
+            if (panel->layer_last_pad == pad) panel->layer_last_pad = DRUM_PRESET_PAGE;
+#endif
 #ifdef ELITE_DRUMS808
             if (pad < D8_NUM) {
                 if (!(panel->drum_latch & DRUM_LATCH_A)) panel->drums_roll.velocity[pad] = 0;
@@ -4916,9 +5324,12 @@ static void read_controls_once(struct panel *panel, unsigned head)
             if (drum_part(panel)) conductor_changed(panel);
 #endif
         } else if (panel->page == PAGE_TONE) {
-            struct patch_snapshot previous = snapshot_patch(panel);
-            select_preset(panel, (panel->preset / TG_PADS) * TG_PADS + pad);
-            remember_patch(panel, &previous);
+            telegram_cancel_browse(panel);
+            if (!telegram_sound_guarded(panel, 0)) {
+                struct patch_snapshot previous = snapshot_patch(panel);
+                select_preset(panel, (panel->preset / TG_PADS) * TG_PADS + pad);
+                remember_patch(panel, &previous);
+            }
         } else if (panel->page != PAGE_FX && panel->page != PAGE_GLOBAL &&
                    panel->page != PAGE_FILTER_ENV && panel->page != PAGE_ARP && panel->page != PAGE_MIX && panel->page != PAGE_SCENES && panel->page != PAGE_KITS && panel->page != PAGE_DILLO_SOUND &&
         panel->page != PAGE_DRUM_PRESETS && panel->page != PAGE_INSTRUMENTS && panel->page != PAGE_SYNTH_PRESETS) {

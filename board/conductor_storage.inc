@@ -392,33 +392,15 @@ static int conductor_dillo_sound_exists(unsigned slots, unsigned slot)
         (slots & (1u << (slot - BB_DILLO_PATCHES))));
 }
 
+_Static_assert(CONDUCTOR_SOUND_BYTES == DILLO_TONE_BYTES, "the journal stores the shared Dillo tone record");
 static void conductor_pack_dillo_sound(uint8_t *out, const bb_dillo_patch *patch)
 {
-    conductor_put16(&out, patch->cutoff_hz);
-    conductor_put16(&out, patch->resonance_x100);
-    *out++ = patch->wave;
-    *out++ = patch->envelope;
-    *out++ = patch->decay;
-    *out++ = patch->accent;
-    *out++ = patch->drive;
-    *out++ = patch->slide_ms;
-    *out++ = patch->attack_ms;
-    *out = patch->tracking;
+    dillo_tone_pack(out, patch);
 }
 
 static int conductor_unpack_dillo_sound(bb_dillo_patch *patch, const uint8_t *in)
 {
-    patch->cutoff_hz = (uint16_t)conductor_get16(&in);
-    patch->resonance_x100 = (uint16_t)conductor_get16(&in);
-    patch->wave = *in++;
-    patch->envelope = *in++;
-    patch->decay = *in++;
-    patch->accent = *in++;
-    patch->drive = *in++;
-    patch->slide_ms = *in++;
-    patch->attack_ms = *in++;
-    patch->tracking = *in;
-    return dillo_patch_valid(patch);
+    return dillo_tone_unpack(patch, in);
 }
 
 static void conductor_pack_dillo_decay(uint8_t *out, dillo_decay decay)
@@ -468,6 +450,8 @@ static void conductor_capture_b_setup(const struct panel *panel, uint8_t *out)
                      panel->drums_focus << 3 | ((panel->drum_latch & DRUM_LATCH_B) ? B_LATCH : 0);
 #ifdef ELITE_PERCUSSION_727
     flags |= (unsigned)part->percussion_kit << B_KIT_SHIFT;
+    /* Keep an explicitly silent performance silent when session trims reset. */
+    if (panel->layer_available && part->enabled && panel->layer_mix[7] == 0) flags |= B_MUTED;
 #endif
     *out++ = (uint8_t)flags;
     *out++ = part->slot;
@@ -511,6 +495,9 @@ static void conductor_apply_b_setup(struct panel *panel, const uint8_t *in)
     part->slot = (uint8_t)slot;
     if (!panel->drums_b_initialized) memset(&part->pattern, 0, sizeof part->pattern);
     else part->pattern = *conductor_b_pattern(panel, slot);
+#ifdef ELITE_PERCUSSION_727
+    layer_identify_pattern(panel);
+#endif
     part->cue++;
 }
 
@@ -825,6 +812,9 @@ static int conductor_restore(struct panel *panel, const uint8_t *in, unsigned si
     conductor_apply_b_setup(panel, b_setup);
     panel->drums_b.kit = b_kit;
     panel->drums_b.pattern = b_working;
+#ifdef ELITE_PERCUSSION_727
+    layer_identify_pattern(panel);
+#endif
     panel->dillo_sound = working_sound;
     panel->dillo_sound_slot = (uint8_t)dillo_sound_slot;
     panel->dillo_sound_slots = (uint8_t)dillo_sound_slots;

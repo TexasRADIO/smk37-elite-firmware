@@ -1,0 +1,1 @@
+import {build} from 'vite';await build({configFile:false,publicDir:false,build:{lib:{entry:new URL('./entry.tsx',import.meta.url).pathname.replaceAll('%20',' '),name:'TelegramInstaller',formats:['iife'],fileName:()=>'installer.js'},outDir:'compiled',emptyOutDir:true},oxc:{jsx:{runtime:'automatic'}},define:{'process.env.NODE_ENV':'"production"'}});

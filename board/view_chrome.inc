@@ -256,7 +256,7 @@ static void view_header(uint16_t *pixels, const struct panel *panel, const char 
 static int view_keycap(uint16_t *pixels, int x, const char *key, const char *action,
                        const struct view_livery *liv)
 {
-    /* The hint row is read from arm's length: the middle face, chip and words. */
+     
     int w = view_picnic_width(key, &picnic_M) + 6;
     if (x + w + 4 + view_picnic_width(action, &picnic_M) > VIEW_W) return VIEW_W; /* whole hints or none */
     view_rect(pixels, x + 1, 221, w - 2, 19, liv->chip);

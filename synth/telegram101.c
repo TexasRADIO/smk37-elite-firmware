@@ -12,9 +12,9 @@ static float clamp(float value, float lo, float hi)
     return value < lo ? lo : value > hi ? hi : value;
 }
 
-/* Effective articulation model measured through public reference audio/PWM.
- * The shared envelope remains
- * linear; only the amplifier has the small closing offset. */
+ 
+
+
 static float envelope_release_flow(float envelope)
 {
     static const float flow[33] = {
@@ -799,14 +799,24 @@ int tg_render(tg_voice *voice, int32_t *stereo, unsigned frames)
         (voice->accent < 0.00001f && voice->accent_target < 0.00001f))
         voice->accent = voice->accent_target = 0;
     /* Resonance changes only when the control smoother advances. */
+    if (voice->smoothing_settled && memcmp(voice->settled_values, patch->value, TG_PARAMETERS))
+        voice->smoothing_settled = 0;
     float k = filter_resonance(p[TG_RESONANCE]);
     float input_gain = filter_input_gain(p[TG_RESONANCE]);
     for (unsigned i = 0; i < frames; i++) {
         clock_tick(voice);
         if (c->repeat_pad) repeat_tick(voice);
-        if ((voice->control_phase++ & 15u) == 0) {
-            for (unsigned j = 0; j < TG_PARAMETERS; j++)
+        if ((voice->control_phase++ & 15u) == 0 && !voice->smoothing_settled) {
+            unsigned moving = 0;
+            for (unsigned j = 0; j < TG_PARAMETERS; j++) {
+                float before = p[j];
                 p[j] += (U7(patch->value[j]) - p[j]) * 0.10f;
+                moving |= before != p[j];
+            }
+            if (!moving) {
+                memcpy(voice->settled_values, patch->value, TG_PARAMETERS);
+                voice->smoothing_settled = 1;
+            }
             k = filter_resonance(p[TG_RESONANCE]);
             input_gain = filter_input_gain(p[TG_RESONANCE]);
         }
@@ -891,10 +901,10 @@ int tg_render(tg_voice *voice, int32_t *stereo, unsigned frames)
         } else if (patch->pwm == TG_PWM_SUB)
             pwm = cycle < (patch->sub_mode == 1 ? 2u : 1u) ? 1.0f : 0.0f;
         float width = clamp(0.5f - p[TG_WIDTH] * 0.48f - pwm * p[TG_PWM] * 0.48f, 0.02f, 0.98f);
-        float square = pulse(voice->phase, width, inc, inverse, leading);
-        float sub = pulse(sub_phase, patch->sub_mode == 2 ? 0.25f : 0.5f,
+        float square = p[TG_PULSE] ? pulse(voice->phase, width, inc, inverse, leading) : 0.0f;
+        float sub = p[TG_SUB] ? pulse(sub_phase, patch->sub_mode == 2 ? 0.25f : 0.5f,
                           inc * divider, inverse / divider,
-                          edge(sub_phase, inc * divider, inverse / divider));
+                          edge(sub_phase, inc * divider, inverse / divider)) : 0.0f;
         voice->phase += inc;
         if (voice->phase >= 1.0f) {
             voice->phase -= 1.0f;
@@ -958,4 +968,49 @@ int tg_render(tg_voice *voice, int32_t *stereo, unsigned frames)
         stereo[2 * i] = stereo[2 * i + 1] = sample;
     }
     return 0;
+}
+
+static uint8_t live_u8(float v)
+{
+    return (uint8_t)(clamp(v, 0, 1) * 255.0f + 0.5f);
+}
+
+void tg_live_read(const tg_voice *voice, tg_live *live)
+{
+    const tg_patch *patch = &voice->controls.patch;
+    const float *p = voice->smooth;
+    unsigned own = patch->filter_env_mode != TG_FILTER_ENV_SHARED;
+    float filter_envelope = own ? voice->filter_envelope : voice->envelope;
+    float signed_envelope = patch->filter_env_mode == TG_FILTER_ENV_CLOSE ? -filter_envelope : filter_envelope;
+    float key = ((float)voice->filter_note + 12.0f * patch->key_octave - 48.0f) * (0.09119275f / 12.0f);
+    float base = patch->filter_low ? p[TG_CUTOFF] * (1.0f + TG_FILTER_LOW_SPAN) - TG_FILTER_LOW_SPAN : p[TG_CUTOFF];
+    float now = base + p[TG_ENV] * signed_envelope * (patch->env_wide ? 1.56f : 0.78f) + p[TG_TRACK] * key +
+                U7(patch->accent_tone) * (3.0f * 0.09119275f) * voice->accent;
+    live->gate = voice->gate != 0;
+    live->stage = voice->stage;
+    live->level = live_u8(voice->envelope);
+    live->filter_stage = own ? voice->filter_stage : voice->stage;
+    live->filter_level = live_u8(filter_envelope);
+    live->active = live->gate || live->level || live->filter_level;
+    live->cutoff_set = live_u8(base);
+    live->cutoff_now = live->active ? live_u8(now) : live->cutoff_set; /* at rest: exactly the control */
+}
+
+int tg_filter_env_reach(const tg_patch *patch)
+{
+    int reach = (int)patch->value[TG_ENV] * (patch->env_wide ? 398 : 199) / 127; /* 0.78 or 1.56 of 255 */
+    return patch->filter_env_mode == TG_FILTER_ENV_CLOSE ? -reach : reach;
+}
+
+__attribute__((minsize)) unsigned tg_stage_ms(unsigned stage, unsigned value)
+{
+    /* control_scale(value, minimum, octaves) in integers, so a display can call it outside the audio
+     * context: minimum * 2^(value/127 * octaves). 2^(i/16) in Q9; the result is within 1% of the law. */
+    static const uint16_t pow2_q9[17] = {512, 535, 558, 583, 609, 636, 664, 693, 724, 756, 790, 825, 861, 899, 939, 981, 1024};
+    uint32_t octaves_q16 = stage == 0 ? 745853u : 805287u;            /* 11.38082 and 12.28771 */
+    uint32_t exponent = (value > 127u ? 127u : value) * octaves_q16 / 127u;
+    uint32_t whole = exponent >> 16, part = (exponent >> 8) & 255u, i = part >> 4, f = part & 15u;
+    uint32_t fraction = pow2_q9[i] + (pow2_q9[i + 1u] - pow2_q9[i]) * f / 16u;
+    uint32_t minimum_q8 = stage == 0 ? 384u : 512u;                   /* 1.5 ms and 2 ms */
+    return (unsigned)((((minimum_q8 << whole) * fraction) + (1u << 16)) >> 17);
 }

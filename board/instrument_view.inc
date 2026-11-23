@@ -322,11 +322,17 @@ static void draw_instrument_page(uint16_t *pixels, const struct panel *panel,
 static void view_flash(uint16_t *pixels, const struct panel *panel)
 {
     if (!panel->main_notice) return;
+#ifdef ELITE_PERCUSSION_727
+    /* Layer browsing keeps its list and controls visible; the inline status carries the cue. */
+    if (panel->main_notice == 2 && panel->page != PAGE_CONDUCTOR &&
+        !(panel->page == PAGE_DRUM_PRESETS && panel->rhythm_source == RHYTHM_BAND))
+        return;
+#endif
     char caption[TG_NAME_BYTES + 16], value[8];
     const char *name = 0;
     unsigned n = 0;
     caption[0] = 0;
-#if defined(ELITE_PERCUSSION_727) && defined(ELITE_BAND_PRESETS)
+#ifdef ELITE_BAND_PRESETS
     if (panel->main_notice == 3 && panel->band_last) {
         unsigned at = panel->band_last - 1u, page = band_page_of(at);
         const struct band_preset_group *group = &factory_band_groups[band_page_group(page)];
@@ -347,19 +353,58 @@ static void view_flash(uint16_t *pixels, const struct panel *panel)
         }
         caption[n] = 0;
         name = factory_band_presets[at].name;
-    } else if (panel->main_notice == 4) {
-        /* A launch held back: it would replace an edit already waiting as a draft. */
-        const char *c = "AN EARLIER EDIT WAITS AS A DRAFT";
+    } else
+#endif
+    if (panel->main_notice == 5) {
+        /* The 101's sound bank, big, with the sound the pad position now plays. */
+        unsigned bank = panel->preset / TG_PADS % TG_PRESET_BANKS;
+        const char *c = "101 SOUNDS  ";
+        while (*c) caption[n++] = *c++;
+        caption[n++] = (char)('1' + bank);
+        caption[n++] = '/';
+        caption[n++] = (char)('0' + TG_PRESET_BANKS);
+        caption[n++] = ' ';
+        caption[n++] = ' ';
+        for (c = tg_presets[panel->preset].name; *c && n < sizeof caption - 1u; c++) caption[n++] = *c;
+        caption[n] = 0;
+        name = tg_bank_names[bank];
+    } else if (panel->main_notice == 7) {
+        /* Preview-first sound browsing: the card moves now and the voice changes once the knob rests. */
+        unsigned at = telegram_browse_target(panel), bank = at / TG_PADS % TG_PRESET_BANKS;
+        const char *c = panel->sound_browse ? "SELECT  " : "NOW  ";
+        while (*c) caption[n++] = *c++;
+        unsigned place = at % TG_PADS + 1u;
+        if (place >= 10u) caption[n++] = (char)('0' + place / 10u);
+        caption[n++] = (char)('0' + place % 10u);
+        caption[n++] = '/'; caption[n++] = '1'; caption[n++] = '6';
+        caption[n++] = ' '; caption[n++] = ' ';
+        for (c = tg_bank_names[bank]; *c && n < sizeof caption - 1u; c++) caption[n++] = *c;
+        caption[n] = 0;
+        name = tg_presets[at].name;
+    } else if (panel->main_notice == 6) {
+        /* A sound change held back: the sound on the keys has edits that are not saved. */
+        const char *c = "EDITED SOUND";
         while (*c) caption[n++] = *c++;
         caption[n] = 0;
+        name = "TURN AGAIN";
+#ifdef ELITE_BAND_PRESETS
+    } else if (panel->main_notice == 4) {
+        /* A launch held back: it would replace an edit already waiting as a draft. */
+        /* A literal copied with its terminator must fit even when the wording changes. */
+        static const char draft[] = "AN EARLIER EDIT IS KEPT";
+        _Static_assert(sizeof draft <= sizeof caption, "draft warning too long");
+        memcpy(caption, draft, sizeof draft);
         name = "PRESS AGAIN";
+#endif
+#ifdef ELITE_PERCUSSION_727
     } else if (panel->main_notice == 2) {
-        const char *c = "727 LAYER  K4";
+        const char *c = !panel->band_layer ? "727 OFF" :
+            panel->drums_b.cue != panel->drums_b_applied ? "727 NEXT" : "727 NOW";
         while (*c) caption[n++] = *c++;
         caption[n] = 0;
         name = panel->band_layer ? layer_rhythm_names[panel->band_layer - 1u] : "OFF";
-    } else
 #endif
+    } else
     if (panel->main_notice == 1) {
         const char *c = "MAIN LEVEL";
         while (*c) caption[n++] = *c++;
@@ -380,8 +425,12 @@ static void view_flash(uint16_t *pixels, const struct panel *panel)
     unsigned len = 0;
     while (caption[len]) len++;
     while (len && view_small_width(caption) > VIEW_W - 16) caption[--len] = 0;
-    view_small(pixels, 8, FLASH_Y + 9, caption,
-               panel->main_notice == 4 || (panel->main_notice == 3 && panel->band_preset) ? CHROME_808_YELLOW : CORAL);
+    unsigned warning = panel->main_notice == 4 || panel->main_notice == 6 ||
+                       (panel->main_notice == 7 && panel->sound_browse);
+#ifdef ELITE_BAND_PRESETS
+    warning |= panel->main_notice == 3 && panel->band_preset;
+#endif
+    view_small(pixels, 8, FLASH_Y + 9, caption, warning ? CHROME_808_YELLOW : CORAL);
     jukebox_big(pixels, 8, FLASH_Y + 26, VIEW_W - 16, name, CHROME_CREAM);
 }
 #endif

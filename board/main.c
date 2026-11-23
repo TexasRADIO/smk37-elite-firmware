@@ -45,6 +45,7 @@ _Static_assert(!FL_GUARD(FL_APP_HI - 0x1000u, 0x1000u) && !FL_GUARD(FL_CAL_LO, 0
 #include "percussion_flash.h"
 #include "percussion_flash.inc"
 static percussion_bank percussion_assets;
+static percussion_attack_cache percussion_attacks __attribute__((section(".pool"), aligned(16)));
 #endif
 
 #define LCD_BAUD 4
@@ -68,6 +69,9 @@ static tg_clockout clockout;
 /* Telegram's live waveform: the audio ISR writes, the play page reads (see synth/scope101.h). */
 static tg_scope scope;
 #define TG_SCOPE_LIVE (&scope)
+/* Telegram's voice as the focus pictures show it: written after each audio block, read by the display. */
+static tg_live live_now;
+#define TG_LIVE (&live_now)
 /* PERFORM (hold FX + the lowest octave): the foreground publishes what is held; the audio ISR plays it. */
 static tg_perform perform;
 /* In .bss, not .pool: same internal SRAM, and it leaves the pool room for the 727 layer. */
@@ -294,12 +298,33 @@ static inline void record_kit_commits(unsigned lanes, uint32_t ticks, unsigned r
 #endif
 
 #ifdef ELITE_PERCUSSION_727
-/* The 727 renders only while it still fits: it is skipped for the block when the other parts have used
- * more than this since the callback began (measured 14 November: 727 0.57 ms, mixer and the rest
- * 0.71 ms at the cymbal bench's worst block; the guard is 5.00 ms). */
-enum { DRUMS_B_LATEST_TICKS = COMMIT_TICKS - 1650u * 24u };
+/* Reserve time for cached percussion, the mixer and DMA commit on either
+ * clock. The independent five-millisecond deadline stays active. */
+/* LATIN has four byte-PCM rows and its seven Compás rows share
+ * choke groups. Use the shorter reserve only for that exact voice map
+ * with verified, cached attacks. A custom or stock kit keeps the full
+ * reserve even when its displayed kit name is LATIN. */
+enum { DRUMS_B_LATEST_TICKS = COMMIT_TICKS - 1100u * 24u,
+       LATIN_LATEST_TICKS = COMMIT_TICKS - 880u * 24u };
 static uint32_t audio_block_start;
-static unsigned drums_b_fits(void) { return fm1_ticks() - audio_block_start < DRUMS_B_LATEST_TICKS; }
+static unsigned drums_b_fits(void)
+{
+    const drum_layer *layer = &launch.drums_b;
+    unsigned limit = DRUMS_B_LATEST_TICKS;
+    if (layer->percussion.bank && layer->percussion.bank->attacks &&
+        !memcmp(layer->percussion_sounds, percussion_factory_kits[P727_LATIN], P727_TRACKS))
+        limit = LATIN_LATEST_TICKS;
+    return fm1_ticks() - audio_block_start < limit;
+}
+#endif
+
+#ifdef ELITE_DRUMS808
+/* The freestanding memset writes one byte per iteration. These three dry
+ * buffers are aligned samples and are cleared for every DMA half. */
+static inline void clear_dry_lane(int32_t *samples, unsigned count)
+{
+    for (unsigned i = 0; i < count; i++) samples[i] = 0;
+}
 #endif
 
 void fm1_alnk0_irq(void)
@@ -365,14 +390,15 @@ void fm1_alnk0_irq(void)
     }
 #endif
     tg_scope_write(&scope, scratch, HALF_WORDS / 2u); /* Telegram alone, before drums and Dillo */
+    tg_live_read(&engine, &live_now);
     tg_perform_lane(&perform, 0, scratch, HALF_WORDS / 2u, 2, perform_mutes_on & 1u);
 #ifdef ELITE_DRUMS808
 #ifdef ELITE_RENDER_PROFILE
     uint32_t telegram_ticks = fm1_ticks() - render_start;
     memset(launch.layer_ticks, 0, sizeof launch.layer_ticks);
 #endif
-    memset(dillo_dry, 0, sizeof dillo_dry);
-    memset(drums_dry, 0, sizeof drums_dry);
+    clear_dry_lane(dillo_dry, sizeof dillo_dry / sizeof dillo_dry[0]);
+    clear_dry_lane(drums_dry, sizeof drums_dry / sizeof drums_dry[0]);
     int32_t *second_dry = NULL;
 #if !defined(ELITE_SINGLE_808) || defined(ELITE_PERCUSSION_727)
     if (
@@ -381,7 +407,7 @@ void fm1_alnk0_irq(void)
 #endif
         conductor_drums_b_active(&launch, &launch_requested)) {
         second_dry = drums_b_dry;
-        memset(second_dry, 0, sizeof drums_b_dry);
+        clear_dry_lane(second_dry, sizeof drums_b_dry / sizeof drums_b_dry[0]);
     }
 #endif
     if (conductor_mix(&launch, dillo_dry, drums_dry, second_dry, HALF_WORDS / 2u,
@@ -623,11 +649,23 @@ static unsigned focus_animation_due(const struct panel *panel, uint32_t previous
     struct focus_card card;
     if (!focus_lookup(panel, panel->strip_knob - 1u, &card)) return 0;
     if ((uint32_t)(panel->view_frames - panel->strip_frame) < 100u) return 1; /* the dial's turn trail */
+    if (panel->motion_state) return panel->view_frames / 40u != previous / 40u; /* MOTION: the bar marker, about 16 times a second */
     switch (card.picture) {
-    case PIC_LEVEL: case PIC_RES: case PIC_ENV: case PIC_ADSR_STAGE: case PIC_DECAY_101:
-    case PIC_PWM: case PIC_LFO: case PIC_VCF_LFO: case PIC_GLIDE: case PIC_VIBRATO:
+    case PIC_LEVEL: case PIC_PWM: case PIC_LFO: case PIC_VCF_LFO: case PIC_VIBRATO:
     case PIC_TEMPO: case PIC_DELAY: case PIC_REVERB: return 1;
-    case PIC_CUTOFF: return panel->sound.patch.value[TG_RESONANCE] > 108;
+    /* The filter and envelope pictures move only when the voice does: redraw while a note sounds,
+     * and once more as it ends so the marker is cleared. */
+    case PIC_CUTOFF: case PIC_RES: case PIC_ENV: case PIC_ADSR_STAGE: case PIC_DECAY_101: {
+        static uint8_t was_active;
+#ifdef TG_LIVE
+        unsigned active = TG_LIVE->active;
+#else
+        unsigned active = 0; /* a host scheduler model without the voice */
+#endif
+        unsigned due = active || was_active;
+        was_active = (uint8_t)active;
+        return due;
+    }
     default: return 0;
     }
 }
@@ -1071,6 +1109,7 @@ static unsigned pool_mount(struct panel *next)
     if (!percussion_flash_open(&percussion_assets, fm1_xip_ptr(0), percussion_flash_clips, percussion_flash_sizes,
                                percussion_flash_crc, fm1_wdt_feed))
         return 0;
+    percussion_prepare_attacks(&percussion_assets, &percussion_attacks);
     next->layer_available = 1;
     if (next->drums_b.percussion_kit) {
         uint32_t f = irq_save();
@@ -1325,13 +1364,18 @@ static void main_loop(void)
 {
     struct panel next = { .page = HOME_PAGE, .pad_light = 72, .pad_midi_channel = 9, .sound = { .tempo = 118, .master = 44, .steps = STARTUP_STEPS } };
     init_map(&next);
+#ifdef ELITE_DRUMS808
+    select_preset(&next, 71); /* a fresh unit opens on Roland's 1982 charts: E.Bass Guitar, bank 1982 FACTORY */
+#else
     select_preset(&next, 0);
+#endif
     uint32_t ui_time = 0, feed_time = 0, pad_time = 0;
     uint8_t last_fault = 0, last_note = 0, last_step = TG_STEPS, shown_fader_caught = 0;
     fl_plain_window_init();
 #ifdef ELITE_PERCUSSION_727
     next.layer_available = !safe_mode && percussion_flash_open(&percussion_assets, fm1_xip_ptr(0),
         percussion_flash_clips, percussion_flash_sizes, percussion_flash_crc, fm1_wdt_feed);
+    if (next.layer_available) percussion_prepare_attacks(&percussion_assets, &percussion_attacks);
 #endif
     library_setup(&next);
 #ifdef ELITE_DRUMS808
@@ -1414,6 +1458,9 @@ static void main_loop(void)
         }
 #endif
         read_performance(&next, visible_pad_head);
+#ifdef ELITE_DRUMS808
+        motion_clock(&next, conductor_running(&next) && drums_head < 16u ? drums_head : 16u, fm1_in.frames);
+#endif
         live_strikes += (uint8_t)(next.sound.live_trigger - requested.live_trigger);
         {
             unsigned route = next.midi_tx;                 /* GLOBAL > MIDI OUT: OFF, USB, TRS, BOTH */
@@ -1492,6 +1539,13 @@ static void main_loop(void)
             audio_controls = &test_controls;
         }
 #endif
+        /* MOTION: the recorded movement reaches the voices as a knob turn does, in the published controls. */
+        tg_controls motion_controls;
+        if (motion_plays(&next)) {
+            motion_controls = *audio_controls;
+            motion_controls.patch.value[next.motion_target - 1u] = motion.effective;
+            audio_controls = &motion_controls;
+        }
         conductor_prepare_kits(&patterns, &launch_requested, launch_kit_buffers);
         unsigned canceled = 0;
         if (cancel) conductor_prepare_cancel(&next, &cancel_drafts);

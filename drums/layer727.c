@@ -48,22 +48,6 @@ void percussion_trigger(percussion_layer *layer, unsigned track, unsigned sound,
 
 static int32_t next_sample(percussion_voice *voice)
 {
-    if (voice->sound >= P727_BOMBO) {
-        /* Keep the source's sample-and-hold character and exact average rate. */
-        int32_t value = ((int32_t)*voice->next - 127) * 128;
-        voice->phase += 9804;
-        if (voice->phase >= 44100) {
-            voice->phase -= 44100;
-            unsigned position = voice->source_phase + hanan_increment[voice->sound - P727_BOMBO];
-            unsigned advance = position >> 2;
-            voice->source_phase = (uint8_t)(position & 3u);
-            if (advance > voice->remaining) advance = voice->remaining;
-            voice->next += advance;
-            voice->remaining -= advance;
-        }
-        return value;
-    }
-
     int32_t sample = voice->sample;
     if (voice->repeats) {
         --voice->repeats;
@@ -76,6 +60,37 @@ static int32_t next_sample(percussion_voice *voice)
     }
     --voice->remaining;
     return sample;
+}
+
+/* A Hanan source byte lasts four or five output frames. Convert and scale
+ * it once per hold. The remainder is the same rational phase as the player. */
+static void render_hanan(percussion_voice *v, int32_t *pcm, unsigned count, int32_t gain)
+{
+    unsigned phase = v->phase, fraction = v->source_phase;
+    unsigned increment = hanan_increment[v->sound - P727_BOMBO];
+    const uint8_t *next = v->next;
+    unsigned remaining = v->remaining;
+    while (count && remaining) {
+        unsigned span = (44100u - phase + 9803u) / 9804u;
+        if (span > count) span = count;
+        count -= span;
+        phase += span * 9804u;
+        int32_t sample = ((int32_t)*next - 127) * 128 * gain;
+        do { *pcm++ += sample; } while (--span);
+        if (phase >= 44100u) {
+            phase -= 44100u;
+            fraction += increment;
+            unsigned advance = fraction >> 2;
+            fraction &= 3u;
+            if (advance > remaining) advance = remaining;
+            next += advance;
+            remaining -= advance;
+        }
+    }
+    v->phase = (uint16_t)phase;
+    v->source_phase = (uint8_t)fraction;
+    v->remaining = remaining;
+    v->next = next;
 }
 
 /* Keep each voice's decoder state local through a render span. The byte
@@ -152,6 +167,54 @@ truncated:
     voice->remaining = 0;
 }
 
+void percussion_prepare_attacks(percussion_bank *bank, percussion_attack_cache *cache)
+{
+    bank->attacks = 0;
+    if (!bank->rice_sizes) return;
+    for (unsigned sound = 0; sound < P727_BOMBO; sound++) {
+        const percussion_clip *clip = &bank->clips[sound];
+        const uint8_t *start = bank->packed727 + clip->offset;
+        percussion_voice v = {.next = start, .rice_end = start + bank->rice_sizes[sound],
+                              .remaining = clip->frames, .sound = (uint8_t)sound};
+        unsigned length = clip->frames < P727_ATTACK_FRAMES ? clip->frames : P727_ATTACK_FRAMES;
+        for (unsigned at = 0; at < length;) {
+            int32_t pcm[32] = {0};
+            unsigned n = length - at < 32 ? length - at : 32;
+            render_rice(&v, pcm, n, 1);
+            if (v.remaining != clip->frames - at - n) { length = 0; break; }
+            for (unsigned i = 0; i < n; i++) cache->pcm[sound][at + i] = (int16_t)pcm[i];
+            at += n;
+        }
+        cache->length[sound] = (uint16_t)length;
+        cache->after[sound] = v;
+    }
+    bank->attacks = cache;
+}
+
+static void render_rice_voice(const percussion_bank *bank, percussion_voice *voice,
+                              int32_t *pcm, unsigned count, int32_t gain)
+{
+    unsigned sound = voice->sound;
+    if (bank->attacks) {
+        unsigned at = bank->clips[sound].frames - voice->remaining;
+        unsigned end = bank->attacks->length[sound];
+        if (at < end) {
+            unsigned n = end - at < count ? end - at : count;
+            const int16_t *src = &bank->attacks->pcm[sound][at];
+            for (unsigned i = 0; i < n; i++) pcm[i] += src[i] * gain;
+            voice->remaining -= n;
+            if (at + n == end) {
+                unsigned velocity = voice->velocity;
+                *voice = bank->attacks->after[sound];
+                voice->velocity = (uint8_t)velocity;
+            }
+            pcm += n;
+            count -= n;
+        }
+    }
+    if (count && voice->remaining) render_rice(voice, pcm, count, gain);
+}
+
 void percussion_render(percussion_layer *layer, int32_t *pcm, unsigned count)
 {
     for (unsigned frame = 0; frame < count; ++frame) pcm[frame] = 0;
@@ -162,7 +225,9 @@ void percussion_render(percussion_layer *layer, int32_t *pcm, unsigned count)
         /* x5 (was x2, +8 dB): measured 14 November, the layer sat 6-17 dB under the 808 at equal level. */
         int32_t gain = (voice->velocity * 5 * (int32_t)layer->track_gain[track]) >> 7;
         if (voice->rice_end) {
-            render_rice(voice, pcm, count, gain);
+            render_rice_voice(layer->bank, voice, pcm, count, gain);
+        } else if (voice->sound >= P727_BOMBO) {
+            render_hanan(voice, pcm, count, gain);
         } else {
             for (unsigned frame = 0; frame < count && voice->remaining; ++frame)
                 pcm[frame] += next_sample(voice) * gain;

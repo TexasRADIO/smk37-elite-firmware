@@ -213,8 +213,7 @@ static void view_conductor_mix(uint16_t *pixels, const struct panel *panel)
     if (panel->layer_available) {
         /* Always on show: which 727 layer plays over the song (K4 turns it). */
         x = view_picnic(pixels, x + 28, 176 - 2, "727", &picnic_S, BAND_MUTED) + 6;
-        view_small(pixels, x, 174, panel->band_layer && !panel->drums_b.muted ?
-                   layer_rhythm_names[panel->band_layer - 1u] : "OFF  K4", panel->band_layer ? CORAL : CHROME_CREAM);
+        view_small(pixels, x, 174, layer_name(panel), panel->band_layer ? CORAL : CHROME_CREAM);
     }
 #endif
 }
@@ -506,14 +505,13 @@ static void view_conductor(uint16_t *pixels, const struct panel *panel, unsigned
     if (panel->layer_available && !hot) {
         /* Always on show: the 727 layer over the song, and the knob that turns it. */
         int x = view_small(pixels, 119, 169, "727", CORAL) + 4;
-        view_small(pixels, x, 169, panel->band_layer && !panel->drums_b.muted ?
-                   layer_rhythm_names[panel->band_layer - 1u] : "OFF  K4 TURNS", CHROME_CREAM);
+        view_small(pixels, x, 169, layer_name(panel), CHROME_CREAM);
     }
 #endif
 #ifdef ELITE_PERCUSSION_727
     if (hot == 4 && panel->layer_available) {
         int x = view_small(pixels, 119, 169, "727", CHROME_CREAM) + 4;
-        view_small(pixels, x, 169, panel->band_layer ? layer_rhythm_names[panel->band_layer - 1u] : "OFF", CORAL);
+        view_small(pixels, x, 169, layer_name(panel), CORAL);
     } else
 #endif
     if (hot && (hot <= BAND_LANES || hot > 4)) {
@@ -547,6 +545,11 @@ static void view_conductor(uint16_t *pixels, const struct panel *panel, unsigned
             setup[6] = (char)('0' + scene);
             x = view_small(pixels, x, 177, setup, CORAL) + 6;
         }
+#ifdef ELITE_PERCUSSION_727
+        /* a queued 727 rhythm is named as the 727's, so the line says what lands at the bar */
+        if (!scene && panel->layer_available && panel->drums_b.cue != panel->drums_b_applied)
+            x = view_small(pixels, x, 177, "727 ", CORAL);
+#endif
         view_small(pixels, x, 177, conductor_clock_lost(panel) ? "WAITS FOR CLOCK" :
                    conductor_running(panel) ? "NEXT BAR  REC+< CANCEL" : "LOADING CUE", CORAL);
     } else {
@@ -561,6 +564,19 @@ static void view_conductor(uint16_t *pixels, const struct panel *panel, unsigned
                      "REC+PAD COPY  REC STARTUP*" : panel->library_status == LIB_SAVED ?
                      "SAVED" : NULL; /* idle: the hint row and hold layers carry the combinations */
         }
-        if (status) view_small(pixels, 8, 177, status, DIM);
+        /* Always say where the band is, after anything more urgent on this line: the 727 layer while
+         * it plays, and which synth the 37 keys play. */
+        int x = status ? view_small(pixels, 8, 177, status, DIM) + 10 : 8;
+#ifdef ELITE_PERCUSSION_727
+        if (!status && panel->layer_available && layer_on(panel)) {
+            x = view_small(pixels, x, 177, "727 ", CHROME_CREAM);
+            x = view_small(pixels, x, 177, conductor_running(panel) ? "PLAYING" : "READY", DIM) + 10;
+        }
+#endif
+        const char *keys = panel->conductor_dillo_keys ? "DILLO" : "TELEGRAM";
+        if (x + view_small_width("KEYS PLAY ") + view_small_width(keys) <= VIEW_W - 4) {
+            x = view_small(pixels, x, 177, "KEYS PLAY ", DIM);
+            view_small(pixels, x, 177, keys, band_lane_color[panel->conductor_dillo_keys ? MIX_DILLO : MIX_TELEGRAM]);
+        }
     }
 }
