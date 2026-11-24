@@ -55,7 +55,6 @@ export async function prepareInstallerSession(device,{fetcher=readAsset,startUpg
   const elite=model==="SMK-37 Elite";
   if(elite)await verifyEliteApplication(bytes,product);
   const bank=elite?await loadBank(fetcher):null;
-  if(elite && device.version>3737851)throw new Error("This Elite has a newer application. Keep its matching installer.");
   const prepared={model,product,image:logicalImage(bytes),elite,bank,firmwareRequired:elite || device.text!==product};
   if(prepared.firmwareRequired)await startUpgrade(prepared);
   return prepared;
