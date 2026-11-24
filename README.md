@@ -7,3 +7,5 @@ Build 851. Elite also includes 727 and LATIN percussion.
 [Install in your browser](https://thebigbeat.app/elite/telegram-101/install/) · [Player guide](https://thebigbeat.app/elite/telegram-101/) · [Download](https://github.com/TexasRADIO/smk37-elite-firmware/releases/tag/build-851) · [Support](https://github.com/TexasRADIO/smk37-elite-firmware/issues)
 
 See [BUILDING.txt](BUILDING.txt) for source build instructions and [THIRD_PARTY.txt](THIRD_PARTY.txt) for credits.
+
+[Launch announcement](LAUNCH.md) · [Directory card](fmhub.json)
