@@ -9,3 +9,7 @@ Build 851. Elite also includes 727 and LATIN percussion.
 See [BUILDING.txt](BUILDING.txt) for source build instructions and [THIRD_PARTY.txt](THIRD_PARTY.txt) for credits.
 
 [Launch announcement](LAUNCH.md) · [Directory card](fmhub.json)
+
+Tested on real hardware, including installation and return.
+
+![Telegram 101 on SMK-37](media/telegram-101-card.png)
