@@ -1419,6 +1419,7 @@ static void main_loop(void)
     requested = applied = next.sound;
     tg_perform_init(&perform, perform_ring);
     last_ms_tick = fm1_ticks();
+    elite_usb_identity_init();
     usb_start();
     ota_wire_mark();
     if (!safe_mode)

@@ -4,8 +4,38 @@
 
 #include <stdint.h>
 
-#define ELITE_USB_PRODUCT "Telegram 101"
-#define ELITE_USB_LEGACY_PRODUCT "ChoralRoot FM-1"
+#ifndef ELITE_USB_PRODUCT
+#define ELITE_USB_PRODUCT "SMK-37 Elite"
+#endif
+#define ELITE_USB_LEGACY_PRODUCT "Telegram 101"
+#define ELITE_USB_OLDER_PRODUCT "ChoralRoot FM-1"
+#define ELITE_USB_SERIAL_INDEX 3u
+#define ELITE_USB_SERIAL_BYTES 66u
+
+/* A USB serial is meaningful only when it is tied to this physical unit.  The
+ * NOR UID is rendered as 32 upper-case hexadecimal characters.  Erased or
+ * zero reads are rejected: the descriptor then advertises no serial instead
+ * of making every failed unit look like the same device. */
+static inline int elite_usb_serial_descriptor(uint8_t out[ELITE_USB_SERIAL_BYTES], const uint8_t uid[16])
+{
+    static const char hex[] = "0123456789ABCDEF";
+    uint8_t any_zero = 0, any_one = 0;
+    for (unsigned i = 0; i < 16u; i++) {
+        any_zero |= uid[i];
+        any_one |= (uint8_t)~uid[i];
+    }
+    if (!any_zero || !any_one)
+        return 0;
+    out[0] = ELITE_USB_SERIAL_BYTES;
+    out[1] = 3;
+    for (unsigned i = 0; i < 16u; i++) {
+        out[2u + 4u * i] = (uint8_t)hex[uid[i] >> 4];
+        out[3u + 4u * i] = 0;
+        out[4u + 4u * i] = (uint8_t)hex[uid[i] & 15u];
+        out[5u + 4u * i] = 0;
+    }
+    return 1;
+}
 
 #define ELITE_USB_DIAG_REQUEST 0xd4
 #define ELITE_USB_DIAG_VALUE 0x454c

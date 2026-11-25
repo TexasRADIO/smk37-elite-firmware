@@ -1,10 +1,10 @@
 import {readAsset} from "./assets.mjs";
-const pins = {"SMK-37 Elite": {"product": "SMK-37 Elite_3737851", "sha256": "1d1e9017357f50400c79604fed70230f7df95fee394c7a60710acb5aabd90027", "file": "Firmware/BB-37-Elite-851.fwsc"}, "SMK-37 Pro": {"product": "SMK-37 Pro_3737851", "sha256": "27060079ecc76aa660f4194fd563ce0bf0e2359b771acc392d4295180f0b06ff", "file": "Firmware/BB-37-Pro-851.fwsc"}, "MKE-P37": {"product": "MKE-P37_3737851", "sha256": "a5461252954c0a84bef4104edc7257a1ff0903d0639ef7a2ec805267db8a6372", "file": "Firmware/BB-37-MKE-P37-851.fwsc"}};
+const pins = {"SMK-37 Elite": {"product": "SMK-37 Elite_3737852", "sha256": "cca38af3451ef5ce111a37d70bd604d39815b9c1f1134f806c4fe179f392db79", "file": "Firmware/BB-37-Elite-852.fwsc"}, "SMK-37 Pro": {"product": "SMK-37 Pro_3737852", "sha256": "e214f4c3b6c679187c37a1e10733c31cb2e543e95ddc1f07cc06fa8b78e8a50e", "file": "Firmware/BB-37-Pro-852.fwsc"}, "MKE-P37": {"product": "MKE-P37_3737852", "sha256": "efab8199c331c71146896bed8beacb377dbd5a0a66e4615dd2f8e1158cf983c0", "file": "Firmware/BB-37-MKE-P37-852.fwsc"}};
 import {loadBank,verifyEliteApplication,sha256 as digest} from "./pool.mjs";
 
 const MODELS=Object.freeze({
   "SMK-37 Pro":"/elite/firmware/bb37-pro.fwsc",
-  "SMK-37 Elite":"/elite/content/BB-37-Elite-Build-851.fwsc",
+  "SMK-37 Elite":"/elite/content/BB-37-Elite-Build-852.fwsc",
   "MKE-P37":"/elite/firmware/bb37-mke-p37.fwsc",
 });
 

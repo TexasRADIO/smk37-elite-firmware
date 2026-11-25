@@ -1,10 +1,10 @@
 # BB–37 Telegram 101
 
-Build 851 · Player guide
+Build 852 · Player guide
 
 Telegram 101 puts a 101 lead, Dillo acid bass and an 808 drum machine on the M-VAVE SMK-37 Elite, SMK-37 Pro and MKE-P37.
 
-[Install BB–37 Telegram 101](https://thebigbeat.app/elite/telegram-101/install/) · [Download Build 851](https://github.com/TexasRADIO/smk37-elite-firmware/releases/tag/build-851) · [Support](https://github.com/TexasRADIO/smk37-elite-firmware/issues) · [Return to M-VAVE firmware](https://thebigbeat.app/elite/install/#return)
+[Install BB–37 Telegram 101](https://thebigbeat.app/elite/telegram-101/install/) · [Download Build 852](https://github.com/TexasRADIO/smk37-elite-firmware/releases/tag/build-852) · [Support](https://github.com/TexasRADIO/smk37-elite-firmware/issues) · [Return to M-VAVE firmware](https://thebigbeat.app/elite/install/#return)
 
 ## Install by USB
 

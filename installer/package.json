@@ -2,7 +2,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node bundle.mjs"
+    "build": "node bundle.mjs",
+    "assets": "node generate-assets.mjs"
   },
   "dependencies": {
     "react": "19.2.8",

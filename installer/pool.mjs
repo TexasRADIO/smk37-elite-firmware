@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Browser transport for the checked BB-37 percussion owner.
-export const ELITE_ID = "SMK-37 Elite_3737851";
-export const APP_SHA256 = "1d1e9017357f50400c79604fed70230f7df95fee394c7a60710acb5aabd90027";
+export const ELITE_ID = "SMK-37 Elite_3737852";
+export const APP_SHA256 = "cca38af3451ef5ce111a37d70bd604d39815b9c1f1134f806c4fe179f392db79";
 export const WINDOWS = Object.freeze([[0x9d000, 0xa0000], [0xa8000, 0xbb000], [0xc2000, 0xea000]]);
 const HEADER = [0xf0, 0x7d, 0x45, 0x4c];
 const STATUS = ["ok", "same", "range", "incomplete", "crc", "busy", "guard", "erase", "program", "verify", "bad"];
@@ -103,8 +103,8 @@ const BANK_HASHES = {
   "layer727.json": "9f6d8778b1f55afbddb3a51a93d99e6cb6ee1db5de69546480a8e5acb95e2b67",
 };
 export function requireElite(device) {
-  if (device?.text !== ELITE_ID || device.model !== "SMK-37 Elite" || device.version !== 3737851)
-    throw new Error("Percussion installation requires BB-37 Elite build 851.");
+  if (device?.text !== ELITE_ID || device.model !== "SMK-37 Elite" || device.version !== 3737852)
+    throw new Error("Percussion installation requires BB-37 Elite build 852.");
 }
 export function inWindow(offset, size) {
   return Number.isSafeInteger(offset) && Number.isSafeInteger(size) && size > 0 &&
@@ -123,7 +123,7 @@ export async function sha256(bytes) {
 }
 export async function verifyEliteApplication(bytes, product) {
   if (product !== ELITE_ID || await sha256(bytes) !== APP_SHA256)
-    throw new Error("The Elite build 851 package checksum did not match.");
+    throw new Error("The Elite build 852 package checksum did not match.");
 }
 export function packPool(bytes) {
   const out = [];
@@ -169,7 +169,7 @@ export class Pool {
   async info() {
     const reply = await this.ask([0x14], b => b.length === 4 || b.length === 7);
     const info = { build: reply[0] * 100 + reply[1], mounted: !!reply[2], busy: !!reply[3], shedBlocks: reply.length === 7 ? get21(reply.slice(4)) : 0 };
-    if (info.build !== 851) throw new Error("The percussion reply came from a different firmware build.");
+    if (info.build !== 852) throw new Error("The percussion reply came from a different firmware build.");
     return info;
   }
   async ready() { const info = await this.info(); if (info.busy) throw new Error("Stop playback before installing percussion."); return info; }

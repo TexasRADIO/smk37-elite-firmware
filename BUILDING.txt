@@ -1,11 +1,11 @@
 Use Python 3 and the JieLi 20260730.1 PI32 toolchain on Linux. Set TOOLCHAIN to the directory containing pi32v2 and common. From the source root run:
 
-python3 board/build.py --toolchain "$TOOLCHAIN" --model elite --build-number 851 --out build/rebuilt-elite727 --synth-presets build/synth-presets --band-presets build/band-presets --dillo --drums --single-808 --drum-render-in-ram --dillo-render-in-ram --render-profile --percussion-plan build/percussion-727
+python3 board/build.py --toolchain "$TOOLCHAIN" --model elite --build-number 852 --out build/rebuilt-elite727 --synth-presets build/synth-presets --band-presets build/band-presets --dillo --drums --single-808 --drum-render-in-ram --dillo-render-in-ram --render-profile --percussion-plan build/percussion-727
 python3 board/verify.py build/rebuilt-elite727
 
-python3 board/build.py --toolchain "$TOOLCHAIN" --model pro --build-number 851 --out build/rebuilt-pro --synth-presets build/synth-presets --band-presets build/band-presets --dillo --drums --single-808 --drum-render-in-ram --dillo-render-in-ram --render-profile
+python3 board/build.py --toolchain "$TOOLCHAIN" --model pro --build-number 852 --out build/rebuilt-pro --synth-presets build/synth-presets --band-presets build/band-presets --dillo --drums --single-808 --drum-render-in-ram --dillo-render-in-ram --render-profile
 python3 board/verify.py build/rebuilt-pro
 
-python3 board/build.py --toolchain "$TOOLCHAIN" --model mke --build-number 851 --out build/rebuilt-mke --synth-presets build/synth-presets --band-presets build/band-presets --dillo --drums --single-808 --drum-render-in-ram --dillo-render-in-ram --render-profile
+python3 board/build.py --toolchain "$TOOLCHAIN" --model mke --build-number 852 --out build/rebuilt-mke --synth-presets build/synth-presets --band-presets build/band-presets --dillo --drums --single-808 --drum-render-in-ram --dillo-render-in-ram --render-profile
 python3 board/verify.py build/rebuilt-mke
 

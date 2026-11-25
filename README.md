@@ -2,9 +2,9 @@
 
 Telegram 101 puts a 101 lead, Dillo acid bass and an 808 drum machine on the M-VAVE SMK-37 Elite, SMK-37 Pro and MKE-P37.
 
-Build 851. Elite also includes 727 and LATIN percussion.
+Build 852. Elite also includes 727 and LATIN percussion. USB MIDI now identifies each supported model by its real name and gives each keyboard a stable unit serial.
 
-[Install in your browser](https://thebigbeat.app/elite/telegram-101/install/) · [Player guide](https://thebigbeat.app/elite/telegram-101/) · [Download](https://github.com/TexasRADIO/smk37-elite-firmware/releases/tag/build-851) · [Support](https://github.com/TexasRADIO/smk37-elite-firmware/issues)
+[Install in your browser](https://thebigbeat.app/elite/telegram-101/install/) · [Player guide](https://thebigbeat.app/elite/telegram-101/) · [Download](https://github.com/TexasRADIO/smk37-elite-firmware/releases/tag/build-852) · [Support](https://github.com/TexasRADIO/smk37-elite-firmware/issues)
 
 See [BUILDING.txt](BUILDING.txt) for source build instructions and [THIRD_PARTY.txt](THIRD_PARTY.txt) for credits.
 

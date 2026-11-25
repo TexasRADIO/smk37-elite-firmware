@@ -64,17 +64,56 @@ def stage_usb_tx(source):
 
 
 def stage_usb_identity(source):
-    # Give the MIDI-only app its own descriptor cache version. The loader is
-    # built from the untouched vendor tree before this staging step.
+    # Give the MIDI-only app its own descriptor cache version and physical-unit
+    # serial. The loader is built from the untouched vendor tree before this
+    # staging step.
     replacements = {
         '"ChoralRoot", "ChoralRoot FM-1"': '"Big Beat", ELITE_USB_PRODUCT',
-        'FELUCCA_USB_PID >> 8, 0x00, 0x03,': 'FELUCCA_USB_PID >> 8, 0x02, 0x03,',
+        'FELUCCA_USB_PID >> 8, 0x00, 0x03,': 'FELUCCA_USB_PID >> 8, 0x03, 0x03,',
+        '1, 2, 0, 1};\nstatic const uint8_t CFG_DESC[]':
+            '1, 2, ELITE_USB_SERIAL_INDEX, 1};\nstatic const uint8_t CFG_DESC[]',
     }
     for old, new in replacements.items():
         if source.count(old) != 1:
             raise ValueError(f"Unexpected USB source at Elite identity: {old}")
         source = source.replace(old, new)
-    return '#include "board/usb_diag.h"\n' + source
+    if source.count('"ChoralRoot In"') != 2:
+        raise ValueError("Unexpected USB source at recording identity")
+    source = source.replace('"ChoralRoot In"', 'ELITE_USB_PRODUCT " In"')
+    app = source.index('/* the device\'s strings:')
+    get_desc = source.index('static int get_desc(', app)
+    source = source[:get_desc] + '#include "board/usb_identity.inc"\n\n' + source[get_desc:]
+    app = source.index('/* the device\'s strings:')
+    suffix = source[app:]
+    old = '        *d = DEV_DESC;\n        *l = sizeof DEV_DESC;\n        return 1;'
+    new = '''#if FELUCCA_UAC
+        *d = DEV_DESC;
+        *l = sizeof DEV_DESC;
+#else
+        if (!elite_usb_identity_initialized)
+            return 0;
+        *d = elite_usb_device_descriptor;
+        *l = sizeof elite_usb_device_descriptor;
+#endif
+        return 1;'''
+    if suffix.count(old) != 1:
+        raise ValueError("Unexpected application device descriptor return")
+    suffix = suffix.replace(old, new)
+    old = '        if (k >= USB_NSTR)\n            return 0;'
+    new = '''        if (k == ELITE_USB_SERIAL_INDEX) {
+            if (!elite_usb_identity_initialized ||
+                elite_usb_device_descriptor[16] != ELITE_USB_SERIAL_INDEX)
+                return 0;
+            *d = elite_usb_serial_descriptor_cache;
+            *l = sizeof elite_usb_serial_descriptor_cache;
+            return 1;
+        }
+        if (k >= USB_NSTR)
+            return 0;'''
+    if suffix.count(old) != 1:
+        raise ValueError("Unexpected application string descriptor bounds")
+    suffix = suffix.replace(old, new)
+    return '#include "board/usb_diag.h"\n' + source[:app] + suffix
 
 
 def font_header(path, dest):
@@ -297,6 +336,7 @@ def build(args):
         "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-Wno-missing-field-initializers",
         f"-DELITE_BUILD={args.build_number}",
         *bsp.BOARD_DEFS["smk37"], f'-DFELUCCA_ID="{product}"',
+        f'-DELITE_USB_PRODUCT="{model["identity"]}"', "-DFL_UID=1",
         "-I.", "-Itools/model-headers", "-Ivendor/bb", "-Ivendor/bb/x0x", "-Ivendor/smk37",
         f"-I{staged / 'firmware/hal'}", f"-I{staged / 'firmware/src'}", f"-I{out}",
     ]
@@ -400,7 +440,7 @@ def build(args):
                            "synth/store101.h", "synth/catalog101.h", "synth/midi101.h", "synth/clock101.h", "synth/clockout101.h", "synth/miditrs101.h", "synth/scope101.h", "synth/learn101.h", "synth/perform101.h", "synth/sideman101.h", "board/smk_uart_tx.h", "board/usb_clock.py", "board/midi_performance.inc", "board/midi_output.inc", "tools/tal_bank.py", "board/library_region.h", "board/library_storage.inc", "board/library_audio.inc", "board/ota_lifecycle.inc", "board/ota_safe_stage.inc", "board/ota_stage.py", "board/ota_trace.h",
                            "board/panel101.inc", "board/pad_feedback.inc", "board/dillo_pattern_sounds.inc", "board/instrument_view.inc", "board/view_chrome.inc", "board/picnic_aa.inc", "board/view_tel.inc", "board/sh101_charts.inc", "board/view_dillo.inc", "board/view_band.inc",
                            "board/view_808.inc", "board/drum_presets.inc", "board/view_footer.inc", "board/view_focus.inc", "board/picnic_title.inc", "board/PICNIC-PROVENANCE.json", "SOURCE-PINS.json", "tools/model-headers/string.h",
-                           "board/usb_diag.h", "board/usb_diag.inc", "board/usb_reconnect.inc", "board/usb_tx.inc", "Makefile"]},
+                           "board/usb_diag.h", "board/usb_diag.inc", "board/usb_identity.inc", "board/usb_reconnect.inc", "board/usb_tx.inc", "Makefile"]},
         "regions": {
             "app_slot": [len(body), bsp.XIP_LEN],
             "ramtext": [sym("_rt_end") - sym("_rt_start"), bsp.RAMTEXT_LEN],
