@@ -286,7 +286,7 @@ export default function EliteInstaller() {
             saveBackup(backup); setHasBackup(true); setSavedBindings(listBrowserBackups(localStorage));
           }, (done: number, total: number) => setStatus(total ? `Installing percussion: ${done} of ${total}…` : "Saving two checked percussion backup reads…"));
         }
-        setStatus(elite ? "BB-37 Elite build 852 and its percussion content are ready. Play the synths." : "BB-37 is installed. Play the synths.");
+        setStatus(elite ? "BB-37 Elite build 856 and its percussion content are ready. Play the synths." : "BB-37 is installed. Play the synths.");
       } finally { complete.link.close(); }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The install did not finish.");
@@ -309,7 +309,7 @@ export default function EliteInstaller() {
       if (!getMidi) throw new Error("Use Chrome or Edge to restore percussion.");
       const midi = await getMidi.call(navigator, { sysex: true });
       const app = await find(midi, device => device.text === ELITE_ID);
-      if (!app) throw new Error("Connect the same Elite with BB-37 build 852 to restore this backup.");
+      if (!app) throw new Error("Connect the same Elite with BB-37 build 856 to restore this backup.");
       link = app.link;
       const connectedBinding = binding(link);
       setBackupBinding(connectedBinding);

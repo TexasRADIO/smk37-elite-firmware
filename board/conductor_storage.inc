@@ -481,6 +481,7 @@ static void conductor_apply_b_setup(struct panel *panel, const uint8_t *in)
     unsigned flags = *in++, slot = *in++;
 #ifdef ELITE_PERCUSSION_727
     part->percussion_kit = (uint8_t)conductor_b_layer_kit(flags);
+    part->rhythm_entry = 0;
 #endif
     part->enabled = !!(flags & B_ENABLED);
     part->muted = !!(flags & B_MUTED);

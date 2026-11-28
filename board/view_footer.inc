@@ -224,7 +224,7 @@ static unsigned strip_hints(const struct panel *panel, unsigned held, struct str
     unsigned page = panel->page, n = 0;
     unsigned destination = bt_destination(panel, 0);
     const char *back = destination == PAGE_CONDUCTOR ? "BAND" :
-                       destination == PAGE_INSTRUMENTS ? "INSTRUMENTS" : "HOME";
+                       destination == PAGE_INSTRUMENTS ? "PARTS" : "HOME";
 #define HINT(k, a) do { if (n < 3) hint[n++] = (struct strip_hint){k, a}; } while (0)
 #ifdef ELITE_SYNTH_PRESETS
     if (page == PAGE_SYNTH_PRESETS) {
@@ -269,9 +269,10 @@ static unsigned strip_hints(const struct panel *panel, unsigned held, struct str
     } else switch (page) {
     case PAGE_TONE:
         if (panel->repeat_edit) { HINT("PAD", "ROLL"); HINT("RATE", "DIV"); break; }
+        HINT("BT", back);
         if (telegram_home_knob(panel, 6)) HINT("K7", "SOUND");
         if (telegram_home_knob(panel, 7)) HINT("K8", "BANK");
-        HINT("BT", back); break;
+        break;
     case PAGE_MANUAL:
         HINT("< >", "SHAPE");
         if (panel->fader_bank == 0) HINT("PARA", "SUB");
@@ -285,17 +286,17 @@ static unsigned strip_hints(const struct panel *panel, unsigned held, struct str
     case PAGE_GLOBAL: HINT("GLOBE", "BACK"); HINT("BT", back); break;
     case PAGE_ASSIGN: HINT("< >", "DEST"); HINT("REC", "SAVE"); HINT("BT", "DONE"); break;
     case PAGE_PATCH: HINT("PAD", "LOAD"); HINT("< >", "PAGE"); HINT("REC", "COPY"); break;
-    case PAGE_DILLO_SOUND: HINT("< >", "SOUNDS"); HINT("PARA", panel->dillo_sound_page ? "TONE" : "MOD"); HINT("PATCH", panel->dillo_sound_home ? "HOME" : "STEPS"); break;
+    case PAGE_DILLO_SOUND: HINT("BT", back); HINT("< >", "SOUNDS"); HINT("PARA", panel->dillo_sound_page ? "TONE" : "MOD"); HINT("PATCH", panel->dillo_sound_home ? "HOME" : "STEPS"); break;
     case PAGE_DILLO:
         if (panel->dillo_record == DILLO_REC_PITCH) { HINT("REC", "TIME"); HINT("PARA", "CANCEL"); HINT("<", "UNDO"); }
         else if (panel->dillo_record == DILLO_REC_TIME) {
             HINT("REC", panel->dillo_take_error ? "CHECK TAKE" : "APPLY"); HINT("PARA", "CANCEL"); HINT("PAD 1-3", "N R T");
         } else if (panel->dillo_record == DILLO_REC_DIRECT) { HINT("KEY", "PITCH"); HINT("REC", "DONE"); HINT("< >", "STEP"); }
-        else { HINT("REC", "ENTER"); HINT("PATCH", "SOUND"); HINT("PARA", "MUTE"); }
+        else { HINT("BT", back); HINT("REC", "ENTER"); HINT("PATCH", "SOUND"); }
         break;
     case PAGE_DRUMS:
         if (panel->drums_repeat) { HINT("PAD", "ROLL"); HINT("K4", "LATCH"); HINT("RPT", "STEPS"); }
-        else { HINT("< >", "VOICE"); HINT("PARA", "MUTE"); HINT("FX", "MIX"); }
+        else { HINT("BT", back); HINT("< >", "VOICE"); HINT("PARA", "MUTE"); }
         break;
     case PAGE_CONDUCTOR: HINT("PAD", "ROLL"); HINT("K4", "LATCH"); break;
     case PAGE_MIX: HINT("PAD", "LANE"); HINT("PARA", "MUTE"); HINT("FX", "BACK"); break;

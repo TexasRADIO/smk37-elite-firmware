@@ -1,5 +1,5 @@
 {
-  "what": "Telegram 101: a 101-style lead, Dillo acid bass, synthesized 808 drums, Band arrangements and one-bar knob-motion recording for SMK-37 Elite, Pro and MKE-P37. Elite also includes 727 and LATIN percussion.",
+  "what": "Telegram 101: a 101-style lead, Dillo acid bass, synthesized 808 drums, Band arrangements and one-bar knob-motion recording for SMK-37 Elite, Pro and MKE-P37. Elite also includes 727 and LATIN percussion. Build 856 adds the BT instrument picker, a steadier Telegram Home display, and next-bar percussion entry on Elite.",
   "author": "Big Beat Studio",
   "kinds": [
     "synth",
@@ -10,7 +10,7 @@
   "color": "#FF8A2A",
   "sounds": "own: Big Beat Studio TR-727 recordings (Elite 727 kit); licensed: Hanan Cumbia by Oficina de Sonido, CC BY-SA 3.0 (Elite LATIN kit). All other voices are synthesized.",
   "smk37": {
-    "what": "Telegram 101: a 101-style lead, Dillo acid bass, synthesized 808 drums, Band arrangements and one-bar knob-motion recording for SMK-37 Elite, Pro and MKE-P37. Elite also includes 727 and LATIN percussion.",
+    "what": "Telegram 101: a 101-style lead, Dillo acid bass, synthesized 808 drums, Band arrangements and one-bar knob-motion recording for SMK-37 Elite, Pro and MKE-P37. Elite also includes 727 and LATIN percussion. Build 856 adds the BT instrument picker, a steadier Telegram Home display, and next-bar percussion entry on Elite.",
     "image": "media/telegram-101-card.png",
     "install": "https://thebigbeat.app/elite/telegram-101/install/",
     "guide": "https://thebigbeat.app/elite/telegram-101/"

@@ -392,7 +392,7 @@ static void view_conductor_hints(uint16_t *pixels, const struct panel *panel, co
     view_rect(pixels, 0, 220, VIEW_W, 20, liv->ground);
     int x = 5;
     if (panel->draft_view) {
-        x = view_keycap(pixels, x, "BT", "HOME", liv);
+        x = view_keycap(pixels, x, "BT", "PARTS", liv);
         if (conductor_scene_pending(panel)) view_keycap(pixels, x, "REC+<", "CANCEL", liv);
         return;
     }
@@ -422,6 +422,7 @@ static void view_conductor_hints(uint16_t *pixels, const struct panel *panel, co
         view_keycap(pixels, x, "KEY", "TRANSP", liv);
         break;
     default:
+        x = view_keycap(pixels, x, "BT", "PARTS", liv);
         /* Most needed first: whatever does not fit is left off whole. */
 #ifdef ELITE_BAND_PRESETS
         x = view_keycap(pixels, x, "PATCH", "SONGS", liv);
@@ -430,8 +431,7 @@ static void view_conductor_hints(uint16_t *pixels, const struct panel *panel, co
         x = view_keycap(pixels, x, "PATCH", "SND", liv);
 #endif
         x = view_keycap(pixels, x, "FX", "MIX", liv);
-        if (ELITE_DRUM_PARTS == 1) x = view_keycap(pixels, x, "BT", "PICK", liv);
-        else x = view_keycap(pixels, x, "REC", "SAVE", liv);
+        if (ELITE_DRUM_PARTS > 1) x = view_keycap(pixels, x, "REC", "SAVE", liv);
         view_keycap(pixels, x, "SEQ", "EDIT", liv);
         break;
     }
@@ -501,18 +501,15 @@ static void view_conductor(uint16_t *pixels, const struct panel *panel, unsigned
     if (slots)
 #endif
     view_small(pixels, 8, 169, slots, DIM);
-#ifdef ELITE_PERCUSSION_727
-    if (panel->layer_available && !hot) {
-        /* Always on show: the 727 layer over the song, and the knob that turns it. */
-        int x = view_small(pixels, 119, 169, "727", CORAL) + 4;
-        view_small(pixels, x, 169, layer_name(panel), CHROME_CREAM);
-    }
-#endif
-#ifdef ELITE_PERCUSSION_727
-    if (hot == 4 && panel->layer_available) {
-        int x = view_small(pixels, 119, 169, "727", CHROME_CREAM) + 4;
-        view_small(pixels, x, 169, layer_name(panel), CORAL);
-    } else
+#if ELITE_DRUM_PARTS == 1 && defined(ELITE_PERCUSSION_727)
+    /* The fourth row belongs to percussion, including while its rhythm is off. */
+    unsigned y = CONDUCTOR_LANE_Y + BAND_LANES * CONDUCTOR_LANE_HEIGHT;
+    uint16_t ink = panel->layer_available ? CORAL : DIM;
+    view_rect(pixels, 0, y, VIEW_W, 35, VIEW_RGB(38, 33, 29));
+    view_rect(pixels, 0, y, 6, 35, panel->layer_available && layer_on(panel) ? CORAL : EDGE);
+    view_picnic(pixels, 11, y + 1, "727", &picnic_M, ink);
+    view_small(pixels, 57, y + 4, panel->layer_available ? layer_name(panel) : "KIT UNAVAILABLE", CHROME_CREAM);
+    if (panel->layer_available) view_small(pixels, 57, y + 20, "K4 RHYTHM", DIM);
 #endif
     if (hot && (hot <= BAND_LANES || hot > 4)) {
         /* The knob being turned, named in full with its value. */

@@ -1,10 +1,10 @@
 # BB–37 Telegram 101
 
-Build 852 · Player guide
+Build 856 · Player guide
 
 Telegram 101 puts a 101 lead, Dillo acid bass and an 808 drum machine on the M-VAVE SMK-37 Elite, SMK-37 Pro and MKE-P37.
 
-[Install BB–37 Telegram 101](https://thebigbeat.app/elite/telegram-101/install/) · [Download Build 852](https://github.com/TexasRADIO/smk37-elite-firmware/releases/tag/build-852) · [Support](https://github.com/TexasRADIO/smk37-elite-firmware/issues) · [Return to M-VAVE firmware](https://thebigbeat.app/elite/install/#return)
+[Install BB–37 Telegram 101](https://thebigbeat.app/elite/telegram-101/install/) · [Download Build 856](https://github.com/TexasRADIO/smk37-elite-firmware/releases/tag/build-856) · [Support](https://github.com/TexasRADIO/smk37-elite-firmware/issues) · [Return to M-VAVE firmware](https://thebigbeat.app/elite/telegram-101/install/#return)
 
 ## Install by USB
 
@@ -12,7 +12,25 @@ Back up your work. Connect one powered instrument directly with a USB data cable
 
 ## Play your first sound
 
-On Telegram Home, play a key. On the first knob page, turn K7 (SOUND) to step through sounds or K8 (BANK) to move between banks. If you have assigned those knobs yourself, your assignments take priority. Use the pads to select sounds within a bank.
+On Telegram Home, play a key. The sound name and bank stay in place during playback. The pitch has its own readout above the knob strip. On the first knob page, turn K7 (SOUND) to step through sounds or K8 (BANK) to move between banks. If you have assigned those knobs yourself, your assignments take priority. Use the pads to select sounds within a bank.
+
+## Switch instruments
+
+Telegram opens at power-on. From a playing page tap **BT** to see the parts. Tap a lit pad in the top row, counting from the left.
+
+| Pad | Opens |
+| --- | --- |
+| 1 | Telegram 101 |
+| 2 | Dillo 303 |
+| 3 | 808 drum editor |
+| 4 | Band |
+| 5 | 727 percussion, on an Elite with its kit loaded |
+
+Tap BT again to dismiss the picker. Within a PATCH library shelf, BT first returns to the page that opened the shelf. Holding BT still opens assignments.
+
+On Elite, look at the fourth row on Band. When it reads **OFF**, turn **K4** one click clockwise to bring in the first 727 rhythm. During playback it comes in on the next bar. Each further click selects the next rhythm. Turn back past the first rhythm to switch the layer off immediately.
+
+To mix the 727, tap **BT**, then **pad 5**. K1–K6 mix the percussion groups and K8 sets the whole layer level. Tap a rhythm pad or turn **K7** to choose a rhythm. Tap **BT**, then **pad 4** to see that rhythm on Band.
 
 ## Shape a sound
 
@@ -32,4 +50,4 @@ All three models include the synthesized 808. On Elite, the installer also check
 
 ## Interrupted install and return
 
-If USB is interrupted in update mode, reconnect the same keyboard and use Install again. For factory firmware, use the return control on the BB–37 install page with M-VAVE’s version 016 file for your exact model.
+If USB is interrupted in update mode, reconnect the same keyboard and use Install again. For factory firmware, use the Return to M-VAVE firmware control in Install.html or on the BB–37 install page with M-VAVE’s version 016 file for your exact model.

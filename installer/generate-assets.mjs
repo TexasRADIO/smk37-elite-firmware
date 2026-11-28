@@ -8,7 +8,7 @@ if (!elite || !pro || !mke) {
 
 const root = resolve(import.meta.dirname, "..");
 const files = {
-  "/elite/content/BB-37-Elite-Build-852.fwsc": elite,
+  "/elite/content/BB-37-Elite-Build-856.fwsc": elite,
   "/elite/firmware/bb37-pro.fwsc": pro,
   "/elite/firmware/bb37-mke-p37.fwsc": mke,
   "/elite/content/compas727.bin": resolve(root, "assets/layer727/compas727.bin"),

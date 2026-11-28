@@ -1,11 +1,23 @@
 Use Python 3 and the JieLi 20260730.1 PI32 toolchain on Linux. Set TOOLCHAIN to the directory containing pi32v2 and common. From the source root run:
 
-python3 board/build.py --toolchain "$TOOLCHAIN" --model elite --build-number 852 --out build/rebuilt-elite727 --synth-presets build/synth-presets --band-presets build/band-presets --dillo --drums --single-808 --drum-render-in-ram --dillo-render-in-ram --render-profile --percussion-plan build/percussion-727
+python3 board/build.py --toolchain "$TOOLCHAIN" --model elite --build-number 856 --out build/rebuilt-elite727 --synth-presets build/synth-presets --band-presets build/band-presets --dillo --drums --single-808 --drum-render-in-ram --dillo-render-in-ram --render-profile --percussion-plan build/percussion-727
 python3 board/verify.py build/rebuilt-elite727
 
-python3 board/build.py --toolchain "$TOOLCHAIN" --model pro --build-number 852 --out build/rebuilt-pro --synth-presets build/synth-presets --band-presets build/band-presets --dillo --drums --single-808 --drum-render-in-ram --dillo-render-in-ram --render-profile
+python3 board/build.py --toolchain "$TOOLCHAIN" --model pro --build-number 856 --out build/rebuilt-pro --synth-presets build/synth-presets --band-presets build/band-presets --dillo --drums --single-808 --drum-render-in-ram --dillo-render-in-ram --render-profile
 python3 board/verify.py build/rebuilt-pro
 
-python3 board/build.py --toolchain "$TOOLCHAIN" --model mke --build-number 852 --out build/rebuilt-mke --synth-presets build/synth-presets --band-presets build/band-presets --dillo --drums --single-808 --drum-render-in-ram --dillo-render-in-ram --render-profile
+python3 board/build.py --toolchain "$TOOLCHAIN" --model mke --build-number 856 --out build/rebuilt-mke --synth-presets build/synth-presets --band-presets build/band-presets --dillo --drums --single-808 --drum-render-in-ram --dillo-render-in-ram --render-profile
 python3 board/verify.py build/rebuilt-mke
 
+Offline browser installer
+
+The three verified FWSC files and the Elite bank are embedded in installer/assets.mjs.
+To regenerate them from rebuilt firmware, run the following in the source root.
+Use Node 24 and pnpm with the locked dependency versions.
+
+node installer/generate-assets.mjs build/rebuilt-elite727/elite-review.fwsc build/rebuilt-pro/elite-review.fwsc build/rebuilt-mke/elite-review.fwsc
+cd installer
+pnpm install --frozen-lockfile
+pnpm run build
+
+For each supplied HTML template, replace /* EMBED_INSTALLER_HERE */ with the literal contents of compiled/installer.js. Save as Install.html and Return.html in the same directory. Keep GUIDE.md alongside the pages.

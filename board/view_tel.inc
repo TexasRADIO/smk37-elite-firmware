@@ -359,8 +359,6 @@ static void view_tel_keyboard(uint16_t *pixels, const struct panel *panel, unsig
     }
 }
 
-/* Telegram home: the sound's name big, the note being played big, one envelope picture and
- * the keybed. Struck pads (when they play sounds) flash the name. */
 /* PERFORM's map while FX is held: the lowest octave as it plays now. White keys hold the effects (blue
  * while held; dim when a slice is too long for the tempo), black keys mute a part (coral while muted). */
 static void view_perform_map(uint16_t *pixels, const struct panel *panel)
@@ -413,16 +411,15 @@ static void view_perform_map(uint16_t *pixels, const struct panel *panel)
 
 enum { VIEW_TEL_PLOT_Y = 94, VIEW_TEL_PLOT_H = 48 };
 
-/* One picture: the sound itself while it plays (three periods of the note, steady on a rising edge),
- * else how it moves (the envelope; the gated VCA as a box). The board defines TG_SCOPE_LIVE; host
- * renders draw the envelope. */
+/* Keep the envelope in view throughout a phrase. Manual playing with transport
+ * stopped can still show the live waveform. */
 static void view_tel_play_plot(uint16_t *pixels, const struct panel *panel, unsigned note)
 {
     const tg_patch *patch = &panel->sound.patch;
     view_rect(pixels, 8, VIEW_TEL_PLOT_Y, 224, VIEW_TEL_PLOT_H, TEL_PLOT);
 #ifdef TG_SCOPE_LIVE
     int8_t wave[217];
-    if (tg_scope_trace(TG_SCOPE_LIVE, tg_scope_period16(note), wave, 217, 20)) {
+    if (!conductor_running(panel) && tg_scope_trace(TG_SCOPE_LIVE, tg_scope_period16(note), wave, 217, 20)) {
         int mid = VIEW_TEL_PLOT_Y + VIEW_TEL_PLOT_H / 2 - 1;
         view_rect(pixels, 12, mid, 216, 1, picnic_mix(TEL_PLOT, DIM, 6u));
         for (int c = 0; c < 216; c++) view_slope(pixels, 12 + c, mid - wave[c], 1, mid - wave[c + 1], CHROME_BLUE);
@@ -448,23 +445,11 @@ static void view_tel_play_stage(uint16_t *pixels, const struct panel *panel, uns
     jukebox_big(pixels, 8, 22, VIEW_W - 22, name, INK);
     if (panel_sound_edited(panel)) view_picnic(pixels, 226, 24, "*", &picnic_M, CORAL);
 
-    /* One line: the note in the large face while it sounds, else which knobs and pads. */
-    if (note) {
-        char text[6];
-        unsigned at = 0;
-        for (const char *c = jukebox_pc_name[note % 12u]; *c; c++) text[at++] = *c;
-        int octave = (int)(note / 12u) - 1;
-        if (octave < 0) { text[at++] = '-'; octave = -octave; }
-        text[at++] = (char)('0' + octave % 10);
-        text[at] = 0;
-        view_picnic(pixels, 8, 58, text, &picnic_L, CHROME_BLUE);
-    } else {
-        unsigned bank = panel->knob_bank;
-        unsigned custom = memcmp(panel->knob_map[bank], tg_default_knob_map[bank], sizeof panel->knob_map[bank]) != 0;
-        /* Home names the 101 sound bank the pads and arrows are on (Telegram 101 first). */
-        view_picnic(pixels, 8, 68, custom ? "USER KNOBS" : panel->user_sound || panel->imported_sound || panel->scene_sound ?
-                    (bank ? "MOD KNOBS" : "TONE KNOBS") : tg_bank_names[panel->preset / TG_PADS % TG_PRESET_BANKS], &picnic_M, DIM);
-    }
+    unsigned bank = panel->knob_bank;
+    unsigned custom = memcmp(panel->knob_map[bank], tg_default_knob_map[bank], sizeof panel->knob_map[bank]) != 0;
+    view_picnic(pixels, 8, 68, custom ? "USER KNOBS" : panel->user_sound || panel->imported_sound || panel->scene_sound ?
+                (bank ? "MOD KNOBS" : "TONE KNOBS") : tg_bank_names[panel->preset / TG_PADS % TG_PRESET_BANKS], &picnic_M, DIM);
+    if (note) view_note(pixels, VIEW_W - 33, 168, note, 1, CHROME_BLUE);
     /* Which of the two knob pages the deck shows (KNOB BANK turns it). */
     for (unsigned d = 0; d < 2; d++) view_rect(pixels, 8 + 12 * (int)d, 175, 9, 3, d == panel->knob_bank ? CHROME_BLUE : DIM);
 #ifdef ELITE_DRUMS808

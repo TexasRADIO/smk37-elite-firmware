@@ -421,13 +421,8 @@ static void view_instruments(uint16_t *pixels, const struct panel *panel)
 #endif
     (void)role;
     view_rect(pixels, 0, 18, VIEW_W, 166, CHROME_BAND);
-    unsigned now = instrument_of_page(panel->instruments_return, panel);
-    unsigned rows = PICK_COUNT;
-#if ELITE_DRUM_PARTS == 1 && defined(ELITE_PERCUSSION_727)
-    if (panel->layer_available) rows++; /* pad 5: the 727 layer */
-    if (panel->instruments_return == PAGE_DRUM_PRESETS && panel->rhythm_source == RHYTHM_LAYER)
-        now = PICK_COUNT;
-#endif
+    unsigned now = picker_current(panel);
+    unsigned rows = picker_rows(panel);
     const int row = rows <= 4 ? 40 : 32;
     const picnic_face *face = rows <= 4 ? &picnic_L : &picnic_M;
     for (unsigned i = 0; i < rows; i++) {

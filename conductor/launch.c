@@ -430,8 +430,12 @@ int conductor_mix(conductor_launch *launch, int32_t *bass, int32_t *drums, int32
         launch->drums_b_update = 1;
         /* Apply the live enables and mutes to the outgoing patterns while
          * replacements wait. Pattern edits can keep their cue generation. */
+        unsigned live_b_controls = 1;
+#ifdef ELITE_PERCUSSION_727
+        live_b_controls = !requested->drums_b.rhythm_entry;
+#endif
         if (!b_pending) acknowledge_drums_b(launch, requested);
-        else {
+        else if (live_b_controls) {
             active->drums_b.enabled = (active->drum_init & 2u) && requested->drums_b.enabled;
             active->drums_b.muted = requested->drums_b.muted;
         }

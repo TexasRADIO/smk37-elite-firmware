@@ -518,6 +518,7 @@ static void conductor_replace_pattern(struct panel *panel, unsigned lane, unsign
     case MIX_808_B:
         panel->drums_b.pattern = *(const drum_pattern *)pattern;
 #ifdef ELITE_PERCUSSION_727
+        panel->drums_b.rhythm_entry = 0;
         layer_identify_pattern(panel);
 #endif
         panel->drums_b_initialized = 1;
@@ -618,6 +619,9 @@ static void conductor_toggle_pattern(struct panel *panel, unsigned lane)
         if (!panel->drums_b_initialized) conductor_cue_pattern(panel, MIX_808_B, 0);
         panel->drums_b.muted = panel->drums_b.enabled && !panel->drums_b.muted;
         panel->drums_b.enabled = 1;
+#ifdef ELITE_PERCUSSION_727
+        panel->drums_b.rhythm_entry = 0; /* A manual mixer action takes effect immediately. */
+#endif
         if (panel->drums_b.muted) clear_drum_rolls(panel, DRUM_LATCH_B);
         break;
     }
@@ -891,6 +895,11 @@ static unsigned conductor_cancel_pending(struct panel *panel, conductor_patterns
         panel->drums_b.cue = request->drums_b.cue = active->drums_b.cue;
 #ifdef ELITE_PERCUSSION_727
         panel->drums_b.percussion_kit = request->drums_b.percussion_kit = active->drums_b.percussion_kit;
+        if (request->drums_b.rhythm_entry) {
+            request->drums_b.enabled = active->drums_b.enabled;
+            request->drums_b.muted = active->drums_b.muted;
+        }
+        panel->drums_b.rhythm_entry = request->drums_b.rhythm_entry = 0;
         layer_identify_pattern(panel);
 #endif
         request->drum_init = (request->drum_init & ~2u) | (active->drum_init & 2u);
@@ -1205,19 +1214,14 @@ static uint8_t home_armed;
 #ifdef ELITE_DRUMS808
 static int library_back(struct panel *panel);
 
-/* A plain BT tap returns to the caller of a Telegram editor. */
+/* BT opens the same picker from every instrument. A second tap dismisses it. */
 static unsigned bt_destination(const struct panel *panel, unsigned globe)
 {
     if (panel->page == PAGE_INSTRUMENTS || panel->page == PAGE_ASSIGN)
         return panel->instruments_return;
-    if (ELITE_DRUM_PARTS != 1) return PAGE_INSTRUMENTS;
-    if (panel->page == PAGE_CONDUCTOR) return globe ? PAGE_INSTRUMENTS : HOME_PAGE;
-    if (globe || panel->from_band) return PAGE_CONDUCTOR;
-    switch (panel->page) {
-    case PAGE_STEPS: case PAGE_MANUAL: case PAGE_FILTER_ENV:
-    case PAGE_FX: case PAGE_ARP: case PAGE_GLOBAL: return HOME_PAGE;
-    default: return PAGE_CONDUCTOR;
-    }
+    if (globe && ELITE_DRUM_PARTS == 1 && panel->page != PAGE_CONDUCTOR)
+        return PAGE_CONDUCTOR;
+    return PAGE_INSTRUMENTS;
 }
 #endif
 
@@ -1551,6 +1555,8 @@ static void conductor_drum_preset_pad(struct panel *panel, unsigned pad)
 static void conductor_cue_layer_rhythm(struct panel *panel, const drum_pattern *pattern)
 {
     conductor_load_drum_pattern(panel, MIX_808_B, pattern);
+    panel->drums_b.rhythm_entry = 1;
+    panel->drums_b.enabled = 1; /* Choosing a 727 rhythm arms even a previously disabled part. */
     panel->drums_b.percussion_kit = P727_LATIN + 1u;
 }
 #endif
@@ -2146,8 +2152,10 @@ static const char *layer_name(const struct panel *panel)
 static void band_layer_turn(struct panel *panel, int delta)
 {
     if (!panel->layer_available) return;
-    int next = bounded((int)panel->band_layer + (delta > 0 ? 1 : -1), 0, LAYER_RHYTHM_COUNT);
-    if (next == panel->band_layer && (next || !layer_on(panel))) return;
+    unsigned playing = layer_on(panel);
+    int current = playing ? panel->band_layer : 0;
+    int next = bounded(current + (delta > 0 ? 1 : -1), 0, LAYER_RHYTHM_COUNT);
+    if (next == current && (next || !playing)) return;
     panel->band_layer = (uint8_t)next;
     panel->layer_combo = 0;
     panel->layer_last_pad = DRUM_PRESET_PAGE;
@@ -2161,6 +2169,7 @@ static void band_layer_turn(struct panel *panel, int delta)
         }
     } else {
         panel->drums_b.muted = 1;
+        panel->drums_b.rhythm_entry = 0;
     }
     conductor_changed(panel);
 }
@@ -2603,10 +2612,30 @@ static unsigned instrument_of_page(unsigned page, const struct panel *panel)
     }
 }
 
+static unsigned picker_rows(const struct panel *panel)
+{
+#if ELITE_DRUM_PARTS == 1 && defined(ELITE_PERCUSSION_727)
+    return PICK_COUNT + (panel->layer_available != 0);
+#else
+    (void)panel;
+    return PICK_COUNT;
+#endif
+}
+
+static unsigned picker_current(const struct panel *panel)
+{
+#if ELITE_DRUM_PARTS == 1 && defined(ELITE_PERCUSSION_727)
+    if (panel->instruments_return == PAGE_DRUM_PRESETS && panel->rhythm_source == RHYTHM_LAYER)
+        return PICK_COUNT;
+#endif
+    return instrument_of_page(panel->instruments_return, panel);
+}
+
 static void pick_instrument(struct panel *panel, unsigned pick, uint32_t frames)
 {
-#if defined(ELITE_PERCUSSION_727)
-    if (ELITE_DRUM_PARTS == 1 && pick == PICK_COUNT && panel->layer_available) {
+    if (pick >= picker_rows(panel)) return;
+#if ELITE_DRUM_PARTS == 1 && defined(ELITE_PERCUSSION_727)
+    if (pick == PICK_COUNT) {
         open_rhythms(panel, RHYTHM_LAYER); /* pad 5: the 727 page */
         return;
     }

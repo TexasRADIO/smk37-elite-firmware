@@ -27,6 +27,7 @@ typedef struct {
     uint8_t enabled, slot, repeat, muted;
 #ifdef ELITE_PERCUSSION_727
     uint8_t percussion_kit; /* Kit plus one, or zero to keep the current kit. */
+    uint8_t rhythm_entry; /* A rhythm selection brings its enable and unmute with its bar cue. */
 #endif
 } conductor_drum_part;
 

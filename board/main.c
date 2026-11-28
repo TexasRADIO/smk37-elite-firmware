@@ -1623,7 +1623,8 @@ static void main_loop(void)
 #ifdef ELITE_DRUMS808
             focus_motion = focus_animation_due(&next, shown.view_frames);
             /* The play page's waveform moves on its own: redraw only its plot when nothing covers it. */
-            scope_motion = next.page == PAGE_TONE && shown.page == PAGE_TONE && !next.key_transpose_armed && !next.perform_view &&
+            scope_motion = next.page == PAGE_TONE && shown.page == PAGE_TONE && !conductor_running(&next) &&
+                !next.key_transpose_armed && !next.perform_view &&
                 !audio_fault && !safe_mode && !view_globe_map_visible(&next) &&
                 !(next.strip_knob && (uint32_t)(next.view_frames - next.strip_frame) < CONTROL_FOCUS_FRAMES);
             if (next.page == PAGE_MANUAL || next.page == PAGE_FILTER_ENV || next.page == PAGE_MIX)

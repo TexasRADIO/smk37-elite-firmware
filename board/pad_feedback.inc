@@ -73,15 +73,19 @@ static uint32_t pad_color(const struct panel *panel, unsigned pad, unsigned head
         b = panel->synth_preset_dillo ? 77 : 15;
 #endif
     } else if (panel->page == PAGE_INSTRUMENTS) {
-        if (pad >= PICK_COUNT) return 0;
+        if (pad >= picker_rows(panel)) return 0;
         /* Lane colours: Telegram orange, Dillo silver, 808 A red, 808 B yellow, Band cream. */
-        static const uint8_t rgb[PICK_COUNT][3] = {
+        static const uint8_t rgb[][3] = {
             [PICK_TELEGRAM] = {100, 50, 15}, [PICK_DILLO] = {84, 81, 77}, [PICK_808_A] = {100, 25, 18},
 #if ELITE_DRUM_PARTS > 1
             [PICK_808_B] = {95, 76, 19},
 #endif
-            [PICK_BAND] = {95, 92, 84}};
-        strength = instrument_of_page(panel->instruments_return, panel) == pad ? 127 : 48;
+            [PICK_BAND] = {95, 92, 84},
+#if ELITE_DRUM_PARTS == 1 && defined(ELITE_PERCUSSION_727)
+            [PICK_COUNT] = {100, 62, 12},
+#endif
+        };
+        strength = picker_current(panel) == pad ? 127 : 48;
         r = rgb[pad][0]; g = rgb[pad][1]; b = rgb[pad][2];
     } else if (panel->page == PAGE_DRUM_PRESETS) {
         unsigned index = rhythm_at(panel, pad);
