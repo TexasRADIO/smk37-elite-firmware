@@ -9,3 +9,5 @@ On Elite, the Band page gives the 727 its own fourth row. Turn K4 clockwise from
 Elite includes the 727 and LATIN percussion banks. SMK-37 Pro and MKE-P37 include Telegram, Dillo, the synthesized 808 and Band.
 
 [Player guide](GUIDE.md) · [Support](https://github.com/TexasRADIO/smk37-elite-firmware/issues)
+
+[Qualification results](QUALIFICATION.md)
